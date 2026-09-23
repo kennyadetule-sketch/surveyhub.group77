@@ -9,7 +9,7 @@ const normalizedBaseUrl = rawBaseUrl === '/'
 
 export const api = axios.create({
   baseURL: normalizedBaseUrl,
-  timeout: 8000,
+  timeout: 20000,
 });
 
 api.interceptors.request.use((config) => {

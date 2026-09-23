@@ -426,7 +426,7 @@ function RegisterPage() {
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
-  return isAuthenticated() ? children : <Navigate to="/login" replace />;
+  return isAuthenticated ? children : <Navigate to="/login" replace />;
 }
 
 function DashboardPage() {

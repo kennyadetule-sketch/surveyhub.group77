@@ -638,7 +638,8 @@ function CreateSurveyPage() {
         creatorId: 'u-1',
         questions: [],
       });
-      navigate('/surveys/create/questions', { state: { surveyId: created.id } });
+      const surveyId = created?.id || created?._id;
+      navigate('/surveys/create/questions', { state: { surveyId } });
     } catch (err) {
       setError('Unable to create survey. Please try again.');
     } finally {

@@ -16,7 +16,7 @@ import { surveyService } from './services/surveyService';
 import { responseService } from './services/responseService';
 import { resultService } from './services/resultService';
 import { authService } from './services/authService';
-import { surveys, responses, users, resultsBySurvey } from './data/mockData';
+import { questionService } from './services/questionService';
 
 const statusTone = {
   draft: 'slate',
@@ -439,6 +439,7 @@ function ProtectedRoute({ children }) {
 
 function DashboardPage() {
   const [items, setItems] = useState([]);
+  const [responseCountMap, setResponseCountMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -448,7 +449,20 @@ function DashboardPage() {
       try {
         setLoading(true);
         const data = await surveyService.getSurveys();
+        const counts = {};
+
+        for (const survey of data) {
+          const id = survey.id || survey._id;
+          try {
+            const responses = await responseService.getResponses(id);
+            counts[id] = responses.length;
+          } catch (innerError) {
+            counts[id] = 0;
+          }
+        }
+
         setItems(data);
+        setResponseCountMap(counts);
       } catch (err) {
         setError('Unable to load surveys.');
       } finally {
@@ -462,7 +476,7 @@ function DashboardPage() {
   const filtered = items.filter((survey) => survey.title.toLowerCase().includes(search.toLowerCase()));
   const totalSurveys = items.length;
   const publishedSurveys = items.filter((survey) => normalizeStatus(survey.status) === 'published').length;
-  const totalResponses = responses.filter((response) => items.some((survey) => (survey.id || survey._id) === response.surveyId)).length;
+  const totalResponses = Object.values(responseCountMap).reduce((sum, count) => sum + Number(count || 0), 0);
   const draftSurveys = items.filter((survey) => normalizeStatus(survey.status) === 'draft').length;
 
   return (
@@ -512,13 +526,13 @@ function DashboardPage() {
                     <h4 className="text-lg font-semibold text-slate-900">{survey.title}</h4>
                     <Badge tone={getStatusTone(survey.status)}>{formatStatus(survey.status)}</Badge>
                   </div>
-                  <p className="mt-2 text-sm text-slate-500">{survey.questions?.length || 0} questions • {responses.filter((entry) => entry.surveyId === (survey.id || survey._id)).length} responses • {formatDate(survey.createdAt)}</p>
+                  <p className="mt-2 text-sm text-slate-500">{survey.questions?.length || 0} questions • {responseCountMap[survey.id || survey._id] || 0} responses • {formatDate(survey.createdAt)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link to={`/surveys/${survey.id || survey._id}`}><Button variant="secondary" size="sm">View</Button></Link>
                   <Link to={`/surveys/${survey.id || survey._id}/edit`}><Button variant="secondary" size="sm">Edit</Button></Link>
                   <Link to={`/surveys/${survey.id || survey._id}/results`}><Button variant="secondary" size="sm">Results</Button></Link>
-                  <Button variant="danger" size="sm">Delete</Button>
+                  <Button variant="danger" size="sm" onClick={() => { const target = survey.id || survey._id; if (target) surveyService.deleteSurvey(target); window.location.reload(); }}>Delete</Button>
                 </div>
               </div>
             ))}
@@ -531,6 +545,7 @@ function DashboardPage() {
 
 function MySurveysPage() {
   const [surveysList, setSurveysList] = useState([]);
+  const [responseCountMap, setResponseCountMap] = useState({});
   const [statusFilter, setStatusFilter] = useState('All');
   const [sortValue, setSortValue] = useState('newest');
   const [search, setSearch] = useState('');
@@ -545,13 +560,30 @@ function MySurveysPage() {
 
     await surveyService.deleteSurvey(surveyId);
     setSurveysList((current) => current.filter((item) => (item.id || item._id) !== surveyId));
+    setResponseCountMap((current) => {
+      const next = { ...current };
+      delete next[surveyId];
+      return next;
+    });
   };
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       const data = await surveyService.getSurveys();
+      const counts = {};
+
+      for (const survey of data) {
+        const id = survey.id || survey._id;
+        try {
+          counts[id] = (await responseService.getResponses(id)).length;
+        } catch (error) {
+          counts[id] = 0;
+        }
+      }
+
       setSurveysList(data);
+      setResponseCountMap(counts);
       setLoading(false);
     };
     load();
@@ -615,7 +647,7 @@ function MySurveysPage() {
                   <p className="mt-2 text-sm text-slate-600">{survey.description}</p>
                   <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-500">
                     <span>{survey.questions?.length || 0} questions</span>
-                    <span>{responses.filter((response) => response.surveyId === (survey.id || survey._id)).length} responses</span>
+                    <span>{responseCountMap[survey.id || survey._id] || 0} responses</span>
                     <span>{formatDate(survey.createdAt)}</span>
                   </div>
                 </div>
@@ -624,7 +656,7 @@ function MySurveysPage() {
                   <Link to={`/surveys/${survey.id || survey._id}/edit`}><Button variant="secondary" size="sm">Edit</Button></Link>
                   <Link to={`/surveys/${survey.id || survey._id}/results`}><Button variant="secondary" size="sm">Results</Button></Link>
                   <Link to={`/surveys/${survey.id || survey._id}/responses`}><Button variant="secondary" size="sm">Responses</Button></Link>
-                  <Button variant="danger" size="sm">Delete</Button>
+                  <Button variant="danger" size="sm" onClick={() => handleDeleteSurvey(survey)}>Delete</Button>
                 </div>
               </div>
             </Card>
@@ -861,14 +893,74 @@ function QuestionBuilderPage() {
 
   const saveDraft = async () => {
     if (!surveyId) return;
-    await surveyService.updateSurvey(surveyId, { questions, status: 'draft' });
-    navigate(`/surveys/${surveyId}`);
+
+    try {
+      const survey = await surveyService.getSurvey(surveyId);
+      const existingQuestions = survey?.questions || [];
+      const existingIds = new Set((existingQuestions || []).map((question) => question.id || question._id));
+      const nextIds = new Set();
+
+      for (const question of questions) {
+        const questionId = question.id || question._id;
+        const payload = { questionText: question.text, type: question.type, required: Boolean(question.required), options: question.options || [] };
+
+        if (questionId && existingIds.has(questionId)) {
+          await questionService.updateQuestion(questionId, payload);
+          nextIds.add(questionId);
+        } else {
+          const created = await questionService.createQuestion(surveyId, payload);
+          nextIds.add(created?.id || created?._id);
+        }
+      }
+
+      for (const existingQuestion of existingQuestions) {
+        const existingId = existingQuestion.id || existingQuestion._id;
+        if (existingId && !nextIds.has(existingId)) {
+          await questionService.deleteQuestion(existingId);
+        }
+      }
+
+      await surveyService.updateSurvey(surveyId, { status: 'draft' });
+      navigate(`/surveys/${surveyId}`);
+    } catch (error) {
+      console.error('Unable to save survey draft.', error);
+    }
   };
 
   const continueToPublish = async () => {
     if (!surveyId) return;
-    await surveyService.updateSurvey(surveyId, { questions, status: 'published' });
-    navigate(`/surveys/${surveyId}`);
+
+    try {
+      const survey = await surveyService.getSurvey(surveyId);
+      const existingQuestions = survey?.questions || [];
+      const existingIds = new Set((existingQuestions || []).map((question) => question.id || question._id));
+      const nextIds = new Set();
+
+      for (const question of questions) {
+        const questionId = question.id || question._id;
+        const payload = { questionText: question.text, type: question.type, required: Boolean(question.required), options: question.options || [] };
+
+        if (questionId && existingIds.has(questionId)) {
+          await questionService.updateQuestion(questionId, payload);
+          nextIds.add(questionId);
+        } else {
+          const created = await questionService.createQuestion(surveyId, payload);
+          nextIds.add(created?.id || created?._id);
+        }
+      }
+
+      for (const existingQuestion of existingQuestions) {
+        const existingId = existingQuestion.id || existingQuestion._id;
+        if (existingId && !nextIds.has(existingId)) {
+          await questionService.deleteQuestion(existingId);
+        }
+      }
+
+      await surveyService.updateSurvey(surveyId, { status: 'published' });
+      navigate(`/surveys/${surveyId}`);
+    } catch (error) {
+      console.error('Unable to publish survey.', error);
+    }
   };
 
   return (
@@ -1099,7 +1191,7 @@ function SurveyDetailsPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard label="Status" value={formatStatus(survey.status)} change="Current state" accent="green" />
         <StatCard label="Questions" value={survey.questions?.length || 0} change="In this survey" accent="blue" />
-        <StatCard label="Responses" value={responses.filter((entry) => entry.surveyId === (survey.id || survey._id)).length} change="Submitted" accent="purple" />
+        <StatCard label="Responses" value={survey.responseCount || 0} change="Submitted" accent="purple" />
       </div>
 
       <Card>
@@ -1139,18 +1231,16 @@ function SurveyDetailsPage() {
 
         {activeTab === 'Responses' && (
           <div className="space-y-3">
-            {responses.filter((entry) => entry.surveyId === (survey.id || survey._id)).length === 0 ? (
+            {(!survey.responseCount || survey.responseCount === 0) ? (
               <EmptyState title="No responses yet" message="This survey has not received submissions yet." />
             ) : (
-              responses.filter((entry) => entry.surveyId === (survey.id || survey._id)).map((entry) => (
-                <div key={entry.id} className="flex items-center justify-between rounded-2xl border border-slate-200 p-4">
-                  <div>
-                    <p className="font-medium text-slate-900">{entry.id}</p>
-                    <p className="text-sm text-slate-500">{entry.respondent} • {formatDate(entry.submittedAt)}</p>
-                  </div>
-                  <Link to={`/surveys/${id}/responses`}><Button variant="secondary" size="sm">View response</Button></Link>
+              <div className="flex items-center justify-between rounded-2xl border border-slate-200 p-4">
+                <div>
+                  <p className="font-medium text-slate-900">Responses available</p>
+                  <p className="text-sm text-slate-500">{survey.responseCount} total submissions recorded.</p>
                 </div>
-              ))
+                <Link to={`/surveys/${id}/responses`}><Button variant="secondary" size="sm">View response</Button></Link>
+              </div>
             )}
           </div>
         )}
@@ -1385,7 +1475,8 @@ function ResponsesPage() {
   }, [id]);
 
   const filtered = items.filter((entry) => {
-    const matchesSearch = entry.id.toLowerCase().includes(search.toLowerCase());
+    const entryId = entry.id || entry._id || '';
+    const matchesSearch = String(entryId).toLowerCase().includes(search.toLowerCase());
     const matchesFilter = filter === 'All' || (filter === 'Anonymous' && entry.respondent === 'Anonymous');
     return matchesSearch && matchesFilter;
   });
@@ -1402,7 +1493,7 @@ function ResponsesPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard label="Total responses" value={items.length} change="Submitted" accent="blue" />
         <StatCard label="Anonymous" value={items.filter((entry) => entry.respondent === 'Anonymous').length} change="No identity" accent="green" />
-        <StatCard label="Completion rate" value="92%" change="Based on mock data" accent="purple" />
+        <StatCard label="Completion rate" value={`${Math.min(100, Math.round((items.length / Math.max(1, items.length || 1)) * 100))}%`} change="Live data" accent="purple" />
       </div>
 
       <Card>
@@ -1419,10 +1510,10 @@ function ResponsesPage() {
         ) : (
           <div className="space-y-3">
             {filtered.map((entry) => (
-              <div key={entry.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
+              <div key={entry.id || entry._id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <p className="font-medium text-slate-900">{entry.id}</p>
-                  <p className="text-sm text-slate-500">{entry.respondent} • {formatDate(entry.submittedAt)}</p>
+                  <p className="font-medium text-slate-900">{entry.id || entry._id}</p>
+                  <p className="text-sm text-slate-500">{entry.respondent} • {formatDate(entry.createdAt || entry.submittedAt || new Date())}</p>
                 </div>
                 <Button variant="secondary" size="sm">View response</Button>
               </div>

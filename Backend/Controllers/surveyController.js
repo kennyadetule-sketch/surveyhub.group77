@@ -12,7 +12,7 @@ const {
   getPublicSurveyById,
 } = require("../Config/mockStore");
 
-const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState === 0;
+const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState !== 1;
 
 const normalizeSurveyValue = (value, fallback, allowedValues) => {
   const normalized = String(value ?? fallback).trim().toLowerCase();

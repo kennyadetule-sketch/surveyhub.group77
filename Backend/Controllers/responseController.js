@@ -4,7 +4,7 @@ const Question = require("../Models/Question");
 const mongoose = require("mongoose");
 const { createResponse, getResponsesBySurvey, findSurveyById, getQuestionsBySurvey } = require("../Config/mockStore");
 
-const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState === 0;
+const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState !== 1;
 
 //create response
 exports.createResponse = async (req, res) => {

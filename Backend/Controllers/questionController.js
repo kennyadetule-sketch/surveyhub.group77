@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const { state, createQuestion, updateQuestion, deleteQuestion, findSurveyById } = require("../Config/mockStore");
 
 const optionTypes = ["multiple-choice", "checkbox"];
-const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState === 0;
+const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState !== 1;
 const findQuestionById = (id) => state.questions.find((question) => String(question._id) === String(id)) || null;
 
 //Create question

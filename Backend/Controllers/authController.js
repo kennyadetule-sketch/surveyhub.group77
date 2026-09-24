@@ -20,15 +20,17 @@ const sanitizeUser = (user) => ({
   fullName: user.fullName,
   email: user.email,
   role: user.role,
+  profileImage: user.profileImage || "",
   createdAt: user.createdAt,
 });
 
-const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState === 0;
+const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState !== 1;
 
 // REGISTER
 exports.register = async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
+    const profileImage = req.file?.path || req.body?.profileImage || "";
 
     if (!fullName || !email || !password) {
       return res.status(400).json({
@@ -55,11 +57,12 @@ exports.register = async (req, res) => {
         });
       }
 
-      const hashedPassword = await bcrypt.hash(password, 1);
+      const hashedPassword = await bcrypt.hash(password, 10);
       const user = createUser({
         fullName,
         email: normalizedEmail,
         password: hashedPassword,
+        profileImage,
         role: "creator",
       });
 
@@ -82,11 +85,12 @@ exports.register = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 1);
+    const hashedPassword = await bcrypt.hash(password, 10);
     const user = await User.create({
       fullName,
       email: normalizedEmail,
       password: hashedPassword,
+      profileImage,
       role: "creator",
     });
 
@@ -101,6 +105,7 @@ exports.register = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Register error:", error);
     return res.status(500).json({
       success: false,
       message: "Error registering user.",
@@ -180,6 +185,7 @@ exports.login = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Login error:", error);
     return res.status(500).json({
       success: false,
       message: "Error logging in user.",
@@ -197,6 +203,7 @@ exports.me = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Profile error:", error);
     return res.status(500).json({
       success: false,
       message: "Unable to retrieve profile.",

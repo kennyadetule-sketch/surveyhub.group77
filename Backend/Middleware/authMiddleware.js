@@ -19,7 +19,7 @@ exports.protect = async (req, res, next) => {
 
     let user;
 
-    if (process.env.MOCK_MODE === "true" || mongoose.connection.readyState === 0) {
+    if (process.env.MOCK_MODE === "true" || mongoose.connection.readyState !== 1) {
       user = findUserById(decoded.id);
     } else {
       user = await User.findById(decoded.id).select("-password");

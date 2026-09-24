@@ -19,10 +19,18 @@ import { authService } from './services/authService';
 import { surveys, responses, users, resultsBySurvey } from './data/mockData';
 
 const statusTone = {
-  Draft: 'slate',
-  Published: 'green',
-  Closed: 'amber',
+  draft: 'slate',
+  published: 'green',
+  closed: 'amber',
 };
+
+const normalizeStatus = (value = 'draft') => String(value ?? 'draft').trim().toLowerCase();
+const formatStatus = (value) => {
+  const normalized = normalizeStatus(value);
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+const getStatusTone = (value) => statusTone[normalizeStatus(value)] || 'slate';
+const normalizeVisibility = (value = 'public') => String(value ?? 'public').trim().toLowerCase();
 
 const publicFeatures = [
   { title: 'Easy to Use', text: 'Create polished surveys in minutes with a clean creator experience.' },
@@ -453,9 +461,9 @@ function DashboardPage() {
 
   const filtered = items.filter((survey) => survey.title.toLowerCase().includes(search.toLowerCase()));
   const totalSurveys = items.length;
-  const publishedSurveys = items.filter((survey) => survey.status === 'Published').length;
-  const totalResponses = responses.filter((response) => items.some((survey) => survey.id === response.surveyId)).length;
-  const draftSurveys = items.filter((survey) => survey.status === 'Draft').length;
+  const publishedSurveys = items.filter((survey) => normalizeStatus(survey.status) === 'published').length;
+  const totalResponses = responses.filter((response) => items.some((survey) => (survey.id || survey._id) === response.surveyId)).length;
+  const draftSurveys = items.filter((survey) => normalizeStatus(survey.status) === 'draft').length;
 
   return (
     <div className="space-y-6">
@@ -498,18 +506,18 @@ function DashboardPage() {
         {!loading && !error && filtered.length > 0 ? (
           <div className="space-y-3">
             {filtered.slice(0, 5).map((survey) => (
-              <div key={survey.id} className="flex flex-col gap-4 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
+              <div key={survey.id || survey._id} className="flex flex-col gap-4 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
                 <div>
                   <div className="flex items-center gap-3">
                     <h4 className="text-lg font-semibold text-slate-900">{survey.title}</h4>
-                    <Badge tone={statusTone[survey.status] || 'slate'}>{survey.status}</Badge>
+                    <Badge tone={getStatusTone(survey.status)}>{formatStatus(survey.status)}</Badge>
                   </div>
-                  <p className="mt-2 text-sm text-slate-500">{survey.questions?.length || 0} questions • {responses.filter((entry) => entry.surveyId === survey.id).length} responses • {formatDate(survey.createdAt)}</p>
+                  <p className="mt-2 text-sm text-slate-500">{survey.questions?.length || 0} questions • {responses.filter((entry) => entry.surveyId === (survey.id || survey._id)).length} responses • {formatDate(survey.createdAt)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Link to={`/surveys/${survey.id}`}><Button variant="secondary" size="sm">View</Button></Link>
-                  <Link to={`/surveys/${survey.id}/edit`}><Button variant="secondary" size="sm">Edit</Button></Link>
-                  <Link to={`/surveys/${survey.id}/results`}><Button variant="secondary" size="sm">Results</Button></Link>
+                  <Link to={`/surveys/${survey.id || survey._id}`}><Button variant="secondary" size="sm">View</Button></Link>
+                  <Link to={`/surveys/${survey.id || survey._id}/edit`}><Button variant="secondary" size="sm">Edit</Button></Link>
+                  <Link to={`/surveys/${survey.id || survey._id}/results`}><Button variant="secondary" size="sm">Results</Button></Link>
                   <Button variant="danger" size="sm">Delete</Button>
                 </div>
               </div>
@@ -528,6 +536,17 @@ function MySurveysPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
+  const handleDeleteSurvey = async (survey) => {
+    const surveyId = survey.id || survey._id;
+    if (!surveyId) return;
+
+    const confirmed = window.confirm(`Delete "${survey.title}"? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    await surveyService.deleteSurvey(surveyId);
+    setSurveysList((current) => current.filter((item) => (item.id || item._id) !== surveyId));
+  };
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -540,7 +559,7 @@ function MySurveysPage() {
 
   const filtered = useMemo(() => {
     let items = [...surveysList];
-    if (statusFilter !== 'All') items = items.filter((survey) => survey.status === statusFilter);
+    if (statusFilter !== 'All') items = items.filter((survey) => normalizeStatus(survey.status) === statusFilter);
     if (search) items = items.filter((survey) => survey.title.toLowerCase().includes(search.toLowerCase()));
     items.sort((a, b) => {
       if (sortValue === 'newest') return new Date(b.createdAt) - new Date(a.createdAt);
@@ -586,25 +605,25 @@ function MySurveysPage() {
       ) : (
         <div className="grid gap-4">
           {filtered.map((survey) => (
-            <Card key={survey.id} className="p-0 overflow-hidden">
+            <Card key={survey.id || survey._id} className="p-0 overflow-hidden">
               <div className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
                 <div>
                   <div className="flex items-center gap-3">
                     <h3 className="text-xl font-semibold text-slate-900">{survey.title}</h3>
-                    <Badge tone={statusTone[survey.status] || 'slate'}>{survey.status}</Badge>
+                    <Badge tone={getStatusTone(survey.status)}>{formatStatus(survey.status)}</Badge>
                   </div>
                   <p className="mt-2 text-sm text-slate-600">{survey.description}</p>
                   <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-500">
                     <span>{survey.questions?.length || 0} questions</span>
-                    <span>{responses.filter((response) => response.surveyId === survey.id).length} responses</span>
+                    <span>{responses.filter((response) => response.surveyId === (survey.id || survey._id)).length} responses</span>
                     <span>{formatDate(survey.createdAt)}</span>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Link to={`/surveys/${survey.id}`}><Button variant="secondary" size="sm">View</Button></Link>
-                  <Link to={`/surveys/${survey.id}/edit`}><Button variant="secondary" size="sm">Edit</Button></Link>
-                  <Link to={`/surveys/${survey.id}/results`}><Button variant="secondary" size="sm">Results</Button></Link>
-                  <Link to={`/surveys/${survey.id}/responses`}><Button variant="secondary" size="sm">Responses</Button></Link>
+                  <Link to={`/surveys/${survey.id || survey._id}`}><Button variant="secondary" size="sm">View</Button></Link>
+                  <Link to={`/surveys/${survey.id || survey._id}/edit`}><Button variant="secondary" size="sm">Edit</Button></Link>
+                  <Link to={`/surveys/${survey.id || survey._id}/results`}><Button variant="secondary" size="sm">Results</Button></Link>
+                  <Link to={`/surveys/${survey.id || survey._id}/responses`}><Button variant="secondary" size="sm">Responses</Button></Link>
                   <Button variant="danger" size="sm">Delete</Button>
                 </div>
               </div>
@@ -622,6 +641,34 @@ function CreateSurveyPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const saveDraft = async () => {
+    setSaving(true);
+    setError('');
+
+    try {
+      const created = await surveyService.createSurvey({
+        title: form.title,
+        description: form.description,
+        visibility: normalizeVisibility(form.visibility),
+        status: 'draft',
+        creatorId: 'u-1',
+        questions: [],
+      });
+
+      const surveyId = created?.id || created?._id;
+      if (!surveyId) {
+        setError('Your draft could not be saved right now. Please try again.');
+        return;
+      }
+
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err?.response?.data?.message || 'We could not save your draft right now. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleContinue = async () => {
     if (!form.title.trim()) {
       setError('Please add a survey title before continuing.');
@@ -629,19 +676,28 @@ function CreateSurveyPage() {
     }
 
     setSaving(true);
+    setError('');
+
     try {
       const created = await surveyService.createSurvey({
         title: form.title,
         description: form.description,
-        visibility: form.visibility,
-        status: form.status,
+        visibility: normalizeVisibility(form.visibility),
+        status: normalizeStatus(form.status),
         creatorId: 'u-1',
         questions: [],
       });
+
       const surveyId = created?.id || created?._id;
+      if (!surveyId) {
+        setError('The survey was created, but the app could not continue to the question builder. Please try again.');
+        return;
+      }
+
       navigate('/surveys/create/questions', { state: { surveyId } });
     } catch (err) {
-      setError('Unable to create survey. Please try again.');
+      const message = err?.response?.data?.message || 'We could not create your survey right now. Please check your details and try again.';
+      setError(message);
     } finally {
       setSaving(false);
     }
@@ -681,8 +737,8 @@ function CreateSurveyPage() {
             <label>
               <span className="mb-2 block text-sm font-medium text-slate-700">Visibility</span>
               <select
-                value={form.visibility}
-                onChange={(e) => setForm({ ...form, visibility: e.target.value })}
+                value={normalizeVisibility(form.visibility)}
+                onChange={(e) => setForm({ ...form, visibility: normalizeVisibility(e.target.value) })}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700"
               >
                 <option value="public">Public</option>
@@ -692,12 +748,12 @@ function CreateSurveyPage() {
             <label>
               <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
               <select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
+                value={normalizeStatus(form.status)}
+                onChange={(e) => setForm({ ...form, status: normalizeStatus(e.target.value) })}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700"
               >
-                <option value="Draft">Draft</option>
-                <option value="Published">Published</option>
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
               </select>
             </label>
           </div>
@@ -706,7 +762,7 @@ function CreateSurveyPage() {
 
           <div className="flex flex-wrap gap-3 pt-4">
             <Link to="/dashboard"><Button variant="secondary">Cancel</Button></Link>
-            <Button variant="secondary" onClick={() => setError('')}>Save Draft</Button>
+            <Button variant="secondary" onClick={saveDraft} disabled={saving}>Save Draft</Button>
             <Button onClick={handleContinue} disabled={saving}>{saving ? 'Creating...' : 'Continue / Add Questions'}</Button>
           </div>
         </div>
@@ -719,6 +775,16 @@ function QuestionBuilderPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const surveyId = location.state?.surveyId;
+
+  if (!surveyId) {
+    return (
+      <ErrorPage
+        message="This survey could not be loaded. Please return to the dashboard and create the survey again."
+        onRetry={() => navigate('/surveys/create')}
+      />
+    );
+  }
+
   const [questions, setQuestions] = useState([
     {
       id: 'default-q-1',
@@ -795,13 +861,13 @@ function QuestionBuilderPage() {
 
   const saveDraft = async () => {
     if (!surveyId) return;
-    await surveyService.updateSurvey(surveyId, { questions });
+    await surveyService.updateSurvey(surveyId, { questions, status: 'draft' });
     navigate(`/surveys/${surveyId}`);
   };
 
   const continueToPublish = async () => {
     if (!surveyId) return;
-    await surveyService.updateSurvey(surveyId, { questions, status: 'Published' });
+    await surveyService.updateSurvey(surveyId, { questions, status: 'published' });
     navigate(`/surveys/${surveyId}`);
   };
 
@@ -905,6 +971,7 @@ function QuestionBuilderPage() {
 }
 
 function EditSurveyPage() {
+  const navigate = useNavigate();
   const { id } = useParams();
   const [survey, setSurvey] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -928,7 +995,7 @@ function EditSurveyPage() {
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Edit survey</p>
           <h2 className="mt-3 text-3xl font-bold text-slate-900">{survey.title}</h2>
         </div>
-        <Badge tone={statusTone[survey.status] || 'slate'}>{survey.status}</Badge>
+        <Badge tone={getStatusTone(survey.status)}>{formatStatus(survey.status)}</Badge>
       </div>
 
       <Card className="space-y-5">
@@ -938,17 +1005,17 @@ function EditSurveyPage() {
         <div className="grid gap-4 md:grid-cols-2">
           <label>
             <span className="mb-2 block text-sm font-medium text-slate-700">Visibility</span>
-            <select value={survey.visibility || 'Public'} onChange={(e) => setSurvey({ ...survey, visibility: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
-              <option value="Public">Public</option>
-              <option value="Private">Private</option>
+            <select value={normalizeVisibility(survey.visibility)} onChange={(e) => setSurvey({ ...survey, visibility: normalizeVisibility(e.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
+              <option value="public">Public</option>
+              <option value="private">Private</option>
             </select>
           </label>
           <label>
             <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
-            <select value={survey.status} onChange={(e) => setSurvey({ ...survey, status: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
-              <option value="Draft">Draft</option>
-              <option value="Published">Published</option>
-              <option value="Closed">Closed</option>
+            <select value={normalizeStatus(survey.status)} onChange={(e) => setSurvey({ ...survey, status: normalizeStatus(e.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
+              <option value="draft">Draft</option>
+              <option value="published">Published</option>
+              <option value="closed">Closed</option>
             </select>
           </label>
         </div>
@@ -964,8 +1031,17 @@ function EditSurveyPage() {
         </div>
 
         <div className="flex flex-wrap gap-3 pt-5">
-          <Button onClick={async () => { await surveyService.updateSurvey(id, survey); }}>Save changes</Button>
-          <Button variant="secondary">Publish / Unpublish</Button>
+          <Button onClick={async () => {
+            const payload = { ...survey, status: normalizeStatus(survey.status), visibility: normalizeVisibility(survey.visibility) };
+            await surveyService.updateSurvey(id, payload);
+            navigate(`/surveys/${id}`);
+          }}>Save changes</Button>
+          <Button variant="secondary" onClick={async () => {
+            const nextStatus = normalizeStatus(survey.status) === 'published' ? 'draft' : 'published';
+            const updated = { ...survey, status: nextStatus, visibility: normalizeVisibility(survey.visibility) };
+            await surveyService.updateSurvey(id, updated);
+            setSurvey(updated);
+          }}>{normalizeStatus(survey.status) === 'published' ? 'Move to Draft' : 'Publish Survey'}</Button>
           <Link to={`/surveys/${id}`}><Button variant="secondary">Back to details</Button></Link>
         </div>
       </Card>
@@ -974,6 +1050,7 @@ function EditSurveyPage() {
 }
 
 function SurveyDetailsPage() {
+  const navigate = useNavigate();
   const { id } = useParams();
   const [survey, setSurvey] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1002,16 +1079,27 @@ function SurveyDetailsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to={`/surveys/${id}/edit`}><Button variant="secondary" size="sm">Edit</Button></Link>
-          <Button variant="secondary" size="sm">Publish / Unpublish</Button>
-          <Button variant="danger" size="sm">Delete</Button>
+          <Button variant="secondary" size="sm" onClick={async () => {
+            const nextStatus = normalizeStatus(survey.status) === 'published' ? 'draft' : 'published';
+            const updated = { ...survey, status: nextStatus, visibility: normalizeVisibility(survey.visibility) };
+            await surveyService.updateSurvey(id, updated);
+            setSurvey(updated);
+            navigate(`/surveys/${id}`);
+          }}>{normalizeStatus(survey.status) === 'published' ? 'Move to Draft' : 'Publish Survey'}</Button>
+          <Button variant="danger" size="sm" onClick={async () => {
+            const confirmed = window.confirm(`Delete "${survey.title}"? This action cannot be undone.`);
+            if (!confirmed) return;
+            await surveyService.deleteSurvey(id);
+            navigate('/dashboard');
+          }}>Delete</Button>
           <Link to={`/survey/${id}`}><Button size="sm">View Public Survey</Button></Link>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="Status" value={survey.status} change="Current state" accent="green" />
+        <StatCard label="Status" value={formatStatus(survey.status)} change="Current state" accent="green" />
         <StatCard label="Questions" value={survey.questions?.length || 0} change="In this survey" accent="blue" />
-        <StatCard label="Responses" value={responses.filter((entry) => entry.surveyId === survey.id).length} change="Submitted" accent="purple" />
+        <StatCard label="Responses" value={responses.filter((entry) => entry.surveyId === (survey.id || survey._id)).length} change="Submitted" accent="purple" />
       </div>
 
       <Card>
@@ -1019,7 +1107,7 @@ function SurveyDetailsPage() {
         <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-500">
           <span>Created: {formatDate(survey.createdAt)}</span>
           <span>Visibility: {survey.visibility || 'Public'}</span>
-          <span>Share link: /survey/{survey.id}</span>
+          <span>Share link: /survey/{survey.id || survey._id}</span>
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
           <Button variant="secondary" size="sm">Copy link</Button>
@@ -1051,10 +1139,10 @@ function SurveyDetailsPage() {
 
         {activeTab === 'Responses' && (
           <div className="space-y-3">
-            {responses.filter((entry) => entry.surveyId === survey.id).length === 0 ? (
+            {responses.filter((entry) => entry.surveyId === (survey.id || survey._id)).length === 0 ? (
               <EmptyState title="No responses yet" message="This survey has not received submissions yet." />
             ) : (
-              responses.filter((entry) => entry.surveyId === survey.id).map((entry) => (
+              responses.filter((entry) => entry.surveyId === (survey.id || survey._id)).map((entry) => (
                 <div key={entry.id} className="flex items-center justify-between rounded-2xl border border-slate-200 p-4">
                   <div>
                     <p className="font-medium text-slate-900">{entry.id}</p>
@@ -1154,7 +1242,7 @@ function PublicSurveyPage() {
 
         <Card className="p-8">
           <div className="mb-6">
-            <Badge tone="green">{survey.status}</Badge>
+            <Badge tone={getStatusTone(survey.status)}>{formatStatus(survey.status)}</Badge>
             <h1 className="mt-4 text-3xl font-bold text-slate-900">{survey.title}</h1>
             <p className="mt-3 text-slate-600">{survey.description}</p>
           </div>

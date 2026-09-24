@@ -14,6 +14,11 @@ const {
 
 const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState === 0;
 
+const normalizeSurveyValue = (value, fallback, allowedValues) => {
+  const normalized = String(value ?? fallback).trim().toLowerCase();
+  return allowedValues.includes(normalized) ? normalized : fallback;
+};
+
 exports.createSurvey = async (req, res) => {
   try {
     const { title, description, visibility, status, coverImage } = req.body;
@@ -25,13 +30,24 @@ exports.createSurvey = async (req, res) => {
       });
     }
 
+    const normalizedVisibility = normalizeSurveyValue(visibility, "public", ["public", "private"]);
+    const normalizedStatus = normalizeSurveyValue(status, "draft", ["draft", "published", "closed"]);
+
+    if (visibility && !["public", "private"].includes(normalizedVisibility)) {
+      return res.status(400).json({ success: false, message: "Visibility must be either public or private." });
+    }
+
+    if (status && !["draft", "published", "closed"].includes(normalizedStatus)) {
+      return res.status(400).json({ success: false, message: "Status must be draft, published, or closed." });
+    }
+
     if (isMockMode()) {
       const survey = createSurvey({
         creator: req.user._id,
         title,
         description,
-        visibility: visibility || "public",
-        status: status || "draft",
+        visibility: normalizedVisibility,
+        status: normalizedStatus,
         coverImage: coverImage || "",
       });
 
@@ -48,8 +64,8 @@ exports.createSurvey = async (req, res) => {
       creator: req.user._id,
       title,
       description,
-      visibility: visibility || "public",
-      status: status || "draft",
+      visibility: normalizedVisibility,
+      status: normalizedStatus,
       coverImage: coverImage || "",
     });
 
@@ -180,10 +196,21 @@ exports.updateSurvey = async (req, res) => {
     }
 
     const { title, description, visibility, status, coverImage } = req.body;
+    const normalizedVisibility = visibility !== undefined ? normalizeSurveyValue(visibility, "public", ["public", "private"]) : survey.visibility;
+    const normalizedStatus = status !== undefined ? normalizeSurveyValue(status, "draft", ["draft", "published", "closed"]) : survey.status;
+
+    if (visibility !== undefined && !["public", "private"].includes(normalizedVisibility)) {
+      return res.status(400).json({ success: false, message: "Visibility must be either public or private." });
+    }
+
+    if (status !== undefined && !["draft", "published", "closed"].includes(normalizedStatus)) {
+      return res.status(400).json({ success: false, message: "Status must be draft, published, or closed." });
+    }
+
     if (title !== undefined) survey.title = title;
     if (description !== undefined) survey.description = description;
-    if (visibility !== undefined) survey.visibility = visibility;
-    if (status !== undefined) survey.status = status;
+    if (visibility !== undefined) survey.visibility = normalizedVisibility;
+    if (status !== undefined) survey.status = normalizedStatus;
     if (coverImage !== undefined) survey.coverImage = coverImage;
 
     await survey.save();

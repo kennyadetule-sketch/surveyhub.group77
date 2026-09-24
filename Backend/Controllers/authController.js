@@ -55,7 +55,7 @@ exports.register = async (req, res) => {
         });
       }
 
-      const hashedPassword = await bcrypt.hash(password, 10);
+      const hashedPassword = await bcrypt.hash(password, 1);
       const user = createUser({
         fullName,
         email: normalizedEmail,
@@ -82,7 +82,7 @@ exports.register = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 1);
     const user = await User.create({
       fullName,
       email: normalizedEmail,

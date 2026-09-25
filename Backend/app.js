@@ -16,9 +16,6 @@ const authRoutes = require("./Routes/authRoutes");
 const app = express();
 const PORT = process.env.PORT || 7000;
 
-// Connect to database
-connectDB();
-
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -60,8 +57,20 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+const startServer = async () => {
+  const dbReady = await connectDB();
+
+  if (!dbReady) {
+    console.error("Database connection failed. Server is not starting.");
+    process.exit(1);
+    return;
+  }
+
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+};
+
+startServer();
 
 module.exports = app;

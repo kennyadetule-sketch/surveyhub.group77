@@ -5,13 +5,14 @@ const cloudinary = require("../Config/Cloudinary");
 const storage = new CloudinaryStorage({
   cloudinary,
   params: {
-    folder: "surveyhub",
+    folder: "surveyhub/profile-images",
     allowed_formats: ["jpg", "jpeg", "png", "webp"],
     transformation: [
       {
-        width: 1200,
-        height: 630,
-        crop: "limit",
+        width: 500,
+        height: 500,
+        crop: "fill",
+        gravity: "face",
       },
     ],
   },

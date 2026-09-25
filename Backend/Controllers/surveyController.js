@@ -422,8 +422,12 @@ exports.deleteSurvey = async (req, res) => {
       });
     }
 
-    // Delete all questions belonging to this survey
+    // Delete all questions and responses belonging to this survey
     await Question.deleteMany({
+      survey: survey._id,
+    });
+
+    await Response.deleteMany({
       survey: survey._id,
     });
 

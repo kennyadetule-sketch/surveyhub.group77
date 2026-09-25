@@ -321,6 +321,7 @@ function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [form, setForm] = useState({ fullName: '', email: '', password: '', confirmPassword: '' });
+  const [profileImage, setProfileImage] = useState(null);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
 
@@ -340,7 +341,12 @@ function RegisterPage() {
     if (!validate()) return;
     setLoading(true);
     try {
-      await register({ fullName: form.fullName, email: form.email, password: form.password });
+      await register({
+        fullName: form.fullName,
+        email: form.email,
+        password: form.password,
+        profileImage,
+      });
       navigate('/dashboard');
     } catch (error) {
       setErrors({ form: error.message || 'Unable to create account.' });
@@ -376,6 +382,20 @@ function RegisterPage() {
               placeholder="you@example.com"
               error={errors.email}
             />
+
+            <div>
+              <label htmlFor="profileImage" className="mb-2 block text-sm font-medium text-slate-700">
+                Profile picture <span className="font-normal text-slate-400">(optional)</span>
+              </label>
+              <input
+                id="profileImage"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={(e) => setProfileImage(e.target.files?.[0] || null)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 shadow-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700"
+              />
+              <p className="mt-1 text-xs text-slate-500">JPG, PNG or WEBP. Maximum 5 MB.</p>
+            </div>
 
             <div className="relative">
               <Input
@@ -439,7 +459,6 @@ function ProtectedRoute({ children }) {
 
 function DashboardPage() {
   const [items, setItems] = useState([]);
-  const [responseCountMap, setResponseCountMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -449,20 +468,7 @@ function DashboardPage() {
       try {
         setLoading(true);
         const data = await surveyService.getSurveys();
-        const counts = {};
-
-        for (const survey of data) {
-          const id = survey.id || survey._id;
-          try {
-            const responses = await responseService.getResponses(id);
-            counts[id] = responses.length;
-          } catch (innerError) {
-            counts[id] = 0;
-          }
-        }
-
         setItems(data);
-        setResponseCountMap(counts);
       } catch (err) {
         setError('Unable to load surveys.');
       } finally {
@@ -476,7 +482,7 @@ function DashboardPage() {
   const filtered = items.filter((survey) => survey.title.toLowerCase().includes(search.toLowerCase()));
   const totalSurveys = items.length;
   const publishedSurveys = items.filter((survey) => normalizeStatus(survey.status) === 'published').length;
-  const totalResponses = Object.values(responseCountMap).reduce((sum, count) => sum + Number(count || 0), 0);
+  const totalResponses = items.reduce((sum, survey) => sum + Number(survey.responseCount || 0), 0);
   const draftSurveys = items.filter((survey) => normalizeStatus(survey.status) === 'draft').length;
 
   return (
@@ -526,7 +532,7 @@ function DashboardPage() {
                     <h4 className="text-lg font-semibold text-slate-900">{survey.title}</h4>
                     <Badge tone={getStatusTone(survey.status)}>{formatStatus(survey.status)}</Badge>
                   </div>
-                  <p className="mt-2 text-sm text-slate-500">{survey.questions?.length || 0} questions • {responseCountMap[survey.id || survey._id] || 0} responses • {formatDate(survey.createdAt)}</p>
+                  <p className="mt-2 text-sm text-slate-500">{survey.questionCount || 0} questions • {survey.responseCount || 0} responses • {formatDate(survey.createdAt)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Link to={`/surveys/${survey.id || survey._id}`}><Button variant="secondary" size="sm">View</Button></Link>
@@ -545,7 +551,6 @@ function DashboardPage() {
 
 function MySurveysPage() {
   const [surveysList, setSurveysList] = useState([]);
-  const [responseCountMap, setResponseCountMap] = useState({});
   const [statusFilter, setStatusFilter] = useState('All');
   const [sortValue, setSortValue] = useState('newest');
   const [search, setSearch] = useState('');
@@ -560,30 +565,13 @@ function MySurveysPage() {
 
     await surveyService.deleteSurvey(surveyId);
     setSurveysList((current) => current.filter((item) => (item.id || item._id) !== surveyId));
-    setResponseCountMap((current) => {
-      const next = { ...current };
-      delete next[surveyId];
-      return next;
-    });
   };
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       const data = await surveyService.getSurveys();
-      const counts = {};
-
-      for (const survey of data) {
-        const id = survey.id || survey._id;
-        try {
-          counts[id] = (await responseService.getResponses(id)).length;
-        } catch (error) {
-          counts[id] = 0;
-        }
-      }
-
       setSurveysList(data);
-      setResponseCountMap(counts);
       setLoading(false);
     };
     load();
@@ -646,8 +634,8 @@ function MySurveysPage() {
                   </div>
                   <p className="mt-2 text-sm text-slate-600">{survey.description}</p>
                   <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-500">
-                    <span>{survey.questions?.length || 0} questions</span>
-                    <span>{responseCountMap[survey.id || survey._id] || 0} responses</span>
+                    <span>{survey.questionCount || 0} questions</span>
+                    <span>{survey.responseCount || 0} responses</span>
                     <span>{formatDate(survey.createdAt)}</span>
                   </div>
                 </div>
@@ -674,6 +662,11 @@ function CreateSurveyPage() {
   const [error, setError] = useState('');
 
   const saveDraft = async () => {
+    if (!form.title.trim() || !form.description.trim()) {
+      setError('Please add a survey title and description before saving.');
+      return;
+    }
+
     setSaving(true);
     setError('');
 
@@ -683,8 +676,6 @@ function CreateSurveyPage() {
         description: form.description,
         visibility: normalizeVisibility(form.visibility),
         status: 'draft',
-        creatorId: 'u-1',
-        questions: [],
       });
 
       const surveyId = created?.id || created?._id;
@@ -702,8 +693,8 @@ function CreateSurveyPage() {
   };
 
   const handleContinue = async () => {
-    if (!form.title.trim()) {
-      setError('Please add a survey title before continuing.');
+    if (!form.title.trim() || !form.description.trim()) {
+      setError('Please add a survey title and description before continuing.');
       return;
     }
 
@@ -716,8 +707,6 @@ function CreateSurveyPage() {
         description: form.description,
         visibility: normalizeVisibility(form.visibility),
         status: normalizeStatus(form.status),
-        creatorId: 'u-1',
-        questions: [],
       });
 
       const surveyId = created?.id || created?._id;
@@ -807,16 +796,6 @@ function QuestionBuilderPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const surveyId = location.state?.surveyId;
-
-  if (!surveyId) {
-    return (
-      <ErrorPage
-        message="This survey could not be loaded. Please return to the dashboard and create the survey again."
-        onRetry={() => navigate('/surveys/create')}
-      />
-    );
-  }
-
   const [questions, setQuestions] = useState([
     {
       id: 'default-q-1',
@@ -835,6 +814,15 @@ function QuestionBuilderPage() {
     };
     loadSurvey();
   }, [surveyId]);
+
+  if (!surveyId) {
+    return (
+      <ErrorPage
+        message="This survey could not be loaded. Please return to the dashboard and create the survey again."
+        onRetry={() => navigate('/surveys/create')}
+      />
+    );
+  }
 
   const updateQuestion = (index, field, value) => {
     setQuestions((current) => current.map((question, i) => i === index ? { ...question, [field]: value } : question));
@@ -902,7 +890,11 @@ function QuestionBuilderPage() {
 
       for (const question of questions) {
         const questionId = question.id || question._id;
-        const payload = { questionText: question.text, type: question.type, required: Boolean(question.required), options: question.options || [] };
+        const payload = { text: question.text?.trim(), type: question.type, required: Boolean(question.required), options: question.options || [] };
+
+        if (!payload.text) {
+          throw new Error(`Question ${questions.indexOf(question) + 1} needs question text.`);
+        }
 
         if (questionId && existingIds.has(questionId)) {
           await questionService.updateQuestion(questionId, payload);
@@ -930,6 +922,11 @@ function QuestionBuilderPage() {
   const continueToPublish = async () => {
     if (!surveyId) return;
 
+    if (questions.length === 0) {
+      console.error('A survey must contain at least one question before publishing.');
+      return;
+    }
+
     try {
       const survey = await surveyService.getSurvey(surveyId);
       const existingQuestions = survey?.questions || [];
@@ -938,7 +935,11 @@ function QuestionBuilderPage() {
 
       for (const question of questions) {
         const questionId = question.id || question._id;
-        const payload = { questionText: question.text, type: question.type, required: Boolean(question.required), options: question.options || [] };
+        const payload = { text: question.text?.trim(), type: question.type, required: Boolean(question.required), options: question.options || [] };
+
+        if (!payload.text) {
+          throw new Error(`Question ${questions.indexOf(question) + 1} needs question text.`);
+        }
 
         if (questionId && existingIds.has(questionId)) {
           await questionService.updateQuestion(questionId, payload);

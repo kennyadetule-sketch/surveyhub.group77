@@ -2,13 +2,18 @@ const mongoose = require("mongoose");
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI);
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
-    process.env.MOCK_MODE = "false";
+    const conn = await mongoose.connect(process.env.MONGO_URI, {
+      dbName: process.env.MONGO_DB_NAME || "SurveyHub",
+      serverSelectionTimeoutMS: 10000,
+    });
+
+    console.log(
+      `MongoDB Connected: ${conn.connection.host}/${conn.connection.name}`
+    );
+
     return true;
   } catch (error) {
-    console.warn("MongoDB not reachable. Starting API in mock mode.");
-    process.env.MOCK_MODE = "true";
+    console.error("MongoDB connection failed:", error.message);
     return false;
   }
 };

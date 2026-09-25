@@ -4,6 +4,7 @@ dotenv.config({ path: path.join(__dirname, ".env") });
 
 const express = require("express");
 const cors = require("cors");
+const mongoose = require("mongoose");
 
 const connectDB = require("./Config/Database");
 
@@ -21,6 +22,19 @@ connectDB();
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Database availability check
+app.use("/api", (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: "The database is temporarily unavailable. Please try again shortly.",
+      data: null,
+    });
+  }
+
+  next();
+});
 
 // Routes
 app.use("/api/surveys", surveyRoutes);

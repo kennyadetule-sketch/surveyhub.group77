@@ -1,83 +1,88 @@
 const mongoose = require("mongoose");
 const Survey = require("../Models/Survey");
 const Question = require("../Models/Question");
+const Response = require("../Models/Response");
 const { sendEmail } = require("../Middleware/EmailSender");
-const {
-  createSurvey,
-  getSurveysByCreator,
-  findSurveyById,
-  updateSurvey,
-  deleteSurvey,
-  getQuestionsBySurvey,
-  getPublicSurveyById,
-} = require("../Config/mockStore");
 
-const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState !== 1;
-
-const normalizeSurveyValue = (value, fallback, allowedValues) => {
-  const normalized = String(value ?? fallback).trim().toLowerCase();
-  return allowedValues.includes(normalized) ? normalized : fallback;
+const normalizeSurveyValue = (value) => {
+  return String(value ?? "").trim().toLowerCase();
 };
 
 exports.createSurvey = async (req, res) => {
   try {
     const { title, description, visibility, status, coverImage } = req.body;
 
-    if (!title || !description) {
+    if (!title?.trim() || !description?.trim()) {
       return res.status(400).json({
         success: false,
         message: "Title and description are required.",
+        data: null,
       });
     }
 
-    const normalizedVisibility = normalizeSurveyValue(visibility, "public", ["public", "private"]);
-    const normalizedStatus = normalizeSurveyValue(status, "draft", ["draft", "published", "closed"]);
+    const normalizedVisibility = normalizeSurveyValue(visibility || "public");
+    const normalizedStatus = normalizeSurveyValue(status || "draft");
 
-    if (visibility && !["public", "private"].includes(normalizedVisibility)) {
-      return res.status(400).json({ success: false, message: "Visibility must be either public or private." });
-    }
-
-    if (status && !["draft", "published", "closed"].includes(normalizedStatus)) {
-      return res.status(400).json({ success: false, message: "Status must be draft, published, or closed." });
-    }
-
-    if (isMockMode()) {
-      const survey = createSurvey({
-        creator: req.user._id,
-        title,
-        description,
-        visibility: normalizedVisibility,
-        status: normalizedStatus,
-        coverImage: coverImage || "",
+    // Validate visibility
+    if (!["public", "private"].includes(normalizedVisibility)) {
+      return res.status(400).json({
+        success: false,
+        message: "Visibility must be either public or private.",
+        data: null,
       });
-
-      try {
-        await sendEmail(req.user.email, "New Survey Created", `Your survey "${survey.title}" has been created successfully.\n\nSurvey ID: ${survey._id}`);
-      } catch (emailError) {
-        console.error("Survey created, but email failed:", emailError.message);
-      }
-
-      return res.status(201).json({ success: true, message: "Survey created successfully.", data: survey });
     }
 
+    // Validate status
+    if (!["draft", "published", "closed"].includes(normalizedStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Status must be draft, published, or closed.",
+        data: null,
+      });
+    }
+
+    // Create the survey in MongoDB
     const survey = await Survey.create({
       creator: req.user._id,
-      title,
-      description,
+      title: title.trim(),
+      description: description.trim(),
       visibility: normalizedVisibility,
       status: normalizedStatus,
       coverImage: coverImage || "",
     });
 
-    try {
-      await sendEmail(req.user.email, "New Survey Created", `Your survey "${survey.title}" has been created successfully.\n\nSurvey ID: ${survey._id}`);
-    } catch (emailError) {
-      console.error("Survey created, but email failed:", emailError.message);
-    }
+    /*
+      IMPORTANT:
+      Do not wait for the email before responding to the frontend.
 
-    return res.status(201).json({ success: true, message: "Survey created successfully.", data: survey });
+      The survey has already been successfully saved to MongoDB.
+      Email is now a secondary/background action.
+    */
+    sendEmail(
+      req.user.email,
+      "New Survey Created",
+      `Your survey "${survey.title}" has been created successfully.\n\nSurvey ID: ${survey._id}`
+    ).catch((emailError) => {
+      console.error(
+        "Survey created successfully, but confirmation email failed:",
+        emailError.message
+      );
+    });
+
+    // Respond immediately after the survey is saved
+    return res.status(201).json({
+      success: true,
+      message: "Survey created successfully.",
+      data: survey,
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Error creating survey." });
+    console.error("Create survey error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to create the survey right now. Please try again.",
+      data: null,
+    });
   }
 };
 
@@ -85,162 +90,358 @@ exports.getSurveys = async (req, res) => {
   try {
     const { search, status } = req.query;
 
-    if (isMockMode()) {
-      let surveys = getSurveysByCreator(req.user._id);
+    const query = {
+      creator: req.user._id,
+    };
 
-      if (status) {
-        surveys = surveys.filter((survey) => survey.status === status);
-      }
-
-      if (search) {
-        const term = String(search).toLowerCase();
-        surveys = surveys.filter(
-          (survey) =>
-            survey.title.toLowerCase().includes(term) || survey.description.toLowerCase().includes(term)
-        );
-      }
-
-      return res.status(200).json({ success: true, data: surveys });
+    if (status) {
+      query.status = normalizeSurveyValue(status);
     }
 
-    const query = { creator: req.user._id };
-    if (status) query.status = status;
-    if (search) {
+    if (search?.trim()) {
       query.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
+        {
+          title: {
+            $regex: search.trim(),
+            $options: "i",
+          },
+        },
+        {
+          description: {
+            $regex: search.trim(),
+            $options: "i",
+          },
+        },
       ];
     }
 
-    const surveys = await Survey.find(query).sort({ createdAt: -1 });
-    return res.status(200).json({ success: true, data: surveys });
+    // Get all surveys belonging to this creator in one query
+    const surveys = await Survey.find(query).sort({ createdAt: -1 }).lean();
+
+    if (surveys.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "Surveys retrieved successfully.",
+        data: [],
+      });
+    }
+
+    const surveyIds = surveys.map((survey) => survey._id);
+
+    /*Get question counts for all surveys at once.*/
+    const questionCounts = await Question.aggregate([
+      {
+        $match: {
+          survey: { $in: surveyIds },
+        },
+      },
+      {
+        $group: {
+          _id: "$survey",
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    /* response counts for all surveys at once.*/
+    const responseCounts = await Response.aggregate([
+      {
+        $match: {
+          survey: { $in: surveyIds },
+        },
+      },
+      {
+        $group: {
+          _id: "$survey",
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Convert aggregation results into easy lookup objects
+    const questionCountMap = {};
+    const responseCountMap = {};
+
+    questionCounts.forEach((item) => {
+      questionCountMap[item._id.toString()] = item.count;
+    });
+
+    responseCounts.forEach((item) => {
+      responseCountMap[item._id.toString()] = item.count;
+    });
+
+    /*
+      Attach counts to each survey.
+      The frontend now receives everything it needs
+      from ONE GET /api/surveys request.
+    */
+    const surveysWithCounts = surveys.map((survey) => {
+      const id = survey._id.toString();
+
+      return {
+        ...survey,
+        questionCount: questionCountMap[id] || 0,
+        responseCount: responseCountMap[id] || 0,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Surveys retrieved successfully.",
+      data: surveysWithCounts,
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Error retrieving surveys." });
+    console.error("Get surveys error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to retrieve your surveys right now. Please try again.",
+      data: null,
+    });
   }
 };
 
 exports.getSurvey = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid survey ID." });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid survey ID.",
+        data: null,
+      });
     }
 
-    if (isMockMode()) {
-      const survey = findSurveyById(req.params.id);
-      if (!survey || String(survey.creator) !== String(req.user._id)) {
-        return res.status(404).json({ success: false, message: "Survey not found." });
-      }
+    const survey = await Survey.findOne({
+      _id: req.params.id,
+      creator: req.user._id,
+    });
 
-      const questions = getQuestionsBySurvey(survey._id);
-      return res.status(200).json({ success: true, data: { ...survey, questions } });
-    }
-
-    const survey = await Survey.findOne({ _id: req.params.id, creator: req.user._id });
     if (!survey) {
-      return res.status(404).json({ success: false, message: "Survey not found." });
+      return res.status(404).json({
+        success: false,
+        message: "Survey not found.",
+        data: null,
+      });
     }
 
-    const questions = await Question.find({ survey: survey._id }).sort({ createdAt: 1 });
-    return res.status(200).json({ success: true, data: { ...survey.toObject(), questions } });
+    const questions = await Question.find({
+      survey: survey._id,
+    }).sort({ createdAt: 1 });
+
+    return res.status(200).json({
+      success: true,
+      message: "Survey retrieved successfully.",
+      data: {
+        ...survey.toObject(),
+        questions,
+      },
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Error retrieving survey." });
+    console.error("Get survey error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to retrieve the survey right now. Please try again.",
+      data: null,
+    });
   }
 };
 
 exports.getPublicSurvey = async (req, res) => {
   try {
-    if (isMockMode()) {
-      const survey = getPublicSurveyById(req.params.id);
-      if (!survey) {
-        return res.status(404).json({ success: false, message: "Survey not found or no longer available." });
-      }
-      const questions = getQuestionsBySurvey(survey._id);
-      return res.status(200).json({ success: true, data: { ...survey, questions } });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid survey ID.",
+        data: null,
+      });
     }
 
-    const survey = await Survey.findOne({ _id: req.params.id, visibility: "public", status: "published" });
+    const survey = await Survey.findOne({
+      _id: req.params.id,
+      visibility: "public",
+      status: "published",
+    });
+
     if (!survey) {
-      return res.status(404).json({ success: false, message: "Survey not found or no longer available." });
+      return res.status(404).json({
+        success: false,
+        message: "Survey not found or no longer available.",
+        data: null,
+      });
     }
 
-    const questions = await Question.find({ survey: survey._id }).sort({ createdAt: 1 });
-    return res.status(200).json({ success: true, data: { ...survey.toObject(), questions } });
+    const questions = await Question.find({
+      survey: survey._id,
+    }).sort({ createdAt: 1 });
+
+    return res.status(200).json({
+      success: true,
+      message: "Public survey retrieved successfully.",
+      data: {
+        ...survey.toObject(),
+        questions,
+      },
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Error retrieving public survey." });
+    console.error("Get public survey error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load this survey right now. Please try again.",
+      data: null,
+    });
   }
 };
 
 exports.updateSurvey = async (req, res) => {
   try {
-    if (isMockMode()) {
-      const existing = findSurveyById(req.params.id);
-      if (!existing || String(existing.creator) !== String(req.user._id)) {
-        return res.status(404).json({ success: false, message: "Survey not found." });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid survey ID.",
+        data: null,
+      });
+    }
+
+    const survey = await Survey.findOne({
+      _id: req.params.id,
+      creator: req.user._id,
+    });
+
+    if (!survey) {
+      return res.status(404).json({
+        success: false,
+        message: "Survey not found.",
+        data: null,
+      });
+    }
+
+    const {
+      title,
+      description,
+      visibility,
+      status,
+      coverImage,
+    } = req.body;
+
+    if (title !== undefined) {
+      if (!title.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Survey title cannot be empty.",
+          data: null,
+        });
       }
 
-      const { title, description, visibility, status, coverImage } = req.body;
-      const survey = updateSurvey(req.params.id, req.user._id, {
-        ...(title !== undefined ? { title } : {}),
-        ...(description !== undefined ? { description } : {}),
-        ...(visibility !== undefined ? { visibility } : {}),
-        ...(status !== undefined ? { status } : {}),
-        ...(coverImage !== undefined ? { coverImage } : {}),
-      });
-
-      return res.status(200).json({ success: true, message: "Survey updated successfully.", data: survey });
+      survey.title = title.trim();
     }
 
-    const survey = await Survey.findOne({ _id: req.params.id, creator: req.user._id });
-    if (!survey) {
-      return res.status(404).json({ success: false, message: "Survey not found." });
+    if (description !== undefined) {
+      if (!description.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Survey description cannot be empty.",
+          data: null,
+        });
+      }
+
+      survey.description = description.trim();
     }
 
-    const { title, description, visibility, status, coverImage } = req.body;
-    const normalizedVisibility = visibility !== undefined ? normalizeSurveyValue(visibility, "public", ["public", "private"]) : survey.visibility;
-    const normalizedStatus = status !== undefined ? normalizeSurveyValue(status, "draft", ["draft", "published", "closed"]) : survey.status;
+    if (visibility !== undefined) {
+      const normalizedVisibility = normalizeSurveyValue(visibility);
 
-    if (visibility !== undefined && !["public", "private"].includes(normalizedVisibility)) {
-      return res.status(400).json({ success: false, message: "Visibility must be either public or private." });
+      if (!["public", "private"].includes(normalizedVisibility)) {
+        return res.status(400).json({
+          success: false,
+          message: "Visibility must be either public or private.",
+          data: null,
+        });
+      }
+
+      survey.visibility = normalizedVisibility;
     }
 
-    if (status !== undefined && !["draft", "published", "closed"].includes(normalizedStatus)) {
-      return res.status(400).json({ success: false, message: "Status must be draft, published, or closed." });
+    if (status !== undefined) {
+      const normalizedStatus = normalizeSurveyValue(status);
+
+      if (!["draft", "published", "closed"].includes(normalizedStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: "Status must be draft, published, or closed.",
+          data: null,
+        });
+      }
+
+      survey.status = normalizedStatus;
     }
 
-    if (title !== undefined) survey.title = title;
-    if (description !== undefined) survey.description = description;
-    if (visibility !== undefined) survey.visibility = normalizedVisibility;
-    if (status !== undefined) survey.status = normalizedStatus;
-    if (coverImage !== undefined) survey.coverImage = coverImage;
+    if (coverImage !== undefined) {
+      survey.coverImage = coverImage;
+    }
 
     await survey.save();
-    return res.status(200).json({ success: true, message: "Survey updated successfully.", data: survey });
+
+    return res.status(200).json({
+      success: true,
+      message: "Survey updated successfully.",
+      data: survey,
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Error updating survey." });
+    console.error("Update survey error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update the survey right now. Please try again.",
+      data: null,
+    });
   }
 };
 
 exports.deleteSurvey = async (req, res) => {
   try {
-    if (isMockMode()) {
-      const surveyExists = findSurveyById(req.params.id);
-      if (!surveyExists || String(surveyExists.creator) !== String(req.user._id)) {
-        return res.status(404).json({ success: false, message: "Survey not found." });
-      }
-
-      deleteSurvey(req.params.id, req.user._id);
-      return res.status(200).json({ success: true, message: "Survey deleted successfully." });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid survey ID.",
+        data: null,
+      });
     }
 
-    const survey = await Survey.findOne({ _id: req.params.id, creator: req.user._id });
+    const survey = await Survey.findOne({
+      _id: req.params.id,
+      creator: req.user._id,
+    });
+
     if (!survey) {
-      return res.status(404).json({ success: false, message: "Survey not found." });
+      return res.status(404).json({
+        success: false,
+        message: "Survey not found.",
+        data: null,
+      });
     }
 
-    await Question.deleteMany({ survey: survey._id });
+    // Delete all questions belonging to this survey
+    await Question.deleteMany({
+      survey: survey._id,
+    });
+
+    // Delete the survey
     await survey.deleteOne();
-    return res.status(200).json({ success: true, message: "Survey deleted successfully." });
+
+    return res.status(200).json({
+      success: true,
+      message: "Survey deleted successfully.",
+      data: null,
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Error deleting survey." });
+    console.error("Delete survey error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to delete the survey right now. Please try again.",
+      data: null,
+    });
   }
 };

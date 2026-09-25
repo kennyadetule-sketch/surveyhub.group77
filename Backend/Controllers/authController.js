@@ -1,8 +1,6 @@
 const User = require("../Models/User");
-const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { createUser, findUserByEmail, findUserById } = require("../Config/mockStore");
 
 const createToken = (user) => {
   return jwt.sign(
@@ -24,7 +22,6 @@ const sanitizeUser = (user) => ({
   createdAt: user.createdAt,
 });
 
-const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState !== 1;
 
 // REGISTER
 exports.register = async (req, res) => {
@@ -47,32 +44,6 @@ exports.register = async (req, res) => {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
-
-    if (isMockMode()) {
-      const existingUser = findUserByEmail(normalizedEmail);
-      if (existingUser) {
-        return res.status(409).json({
-          success: false,
-          message: "An account with this email already exists.",
-        });
-      }
-
-      const hashedPassword = await bcrypt.hash(password, 10);
-      const user = createUser({
-        fullName,
-        email: normalizedEmail,
-        password: hashedPassword,
-        profileImage,
-        role: "creator",
-      });
-
-      const token = createToken(user);
-      return res.status(201).json({
-        success: true,
-        message: "User registered successfully.",
-        data: { user: sanitizeUser(user), token },
-      });
-    }
 
     const existingUser = await User.findOne({
       email: normalizedEmail,
@@ -128,31 +99,6 @@ exports.login = async (req, res) => {
     const normalizedEmail = String(email).trim().toLowerCase();
 
     let user;
-
-    if (isMockMode()) {
-      user = findUserByEmail(normalizedEmail);
-      if (!user) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid email or password.",
-        });
-      }
-
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid email or password.",
-        });
-      }
-
-      const token = createToken(user);
-      return res.status(200).json({
-        success: true,
-        message: "Login successful.",
-        data: { user: sanitizeUser(user), token },
-      });
-    }
 
     user = await User.findOne({
       email: normalizedEmail,

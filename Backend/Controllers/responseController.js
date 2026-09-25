@@ -1,10 +1,6 @@
 const Response = require("../Models/Response");
 const Survey = require("../Models/Survey");
 const Question = require("../Models/Question");
-const mongoose = require("mongoose");
-const { createResponse, getResponsesBySurvey, findSurveyById, getQuestionsBySurvey } = require("../Config/mockStore");
-
-const isMockMode = () => process.env.MOCK_MODE === "true" || mongoose.connection.readyState !== 1;
 
 //create response
 exports.createResponse = async (req, res) => {
@@ -13,30 +9,6 @@ exports.createResponse = async (req, res) => {
 
     if (!surveyId || !answers || typeof answers !== "object") {
       return res.status(400).json({ success: false, message: "Survey ID and answers are required." });
-    }
-
-    if (isMockMode()) {
-      const survey = findSurveyById(surveyId);
-      if (!survey || survey.visibility !== "public" || survey.status !== "published") {
-        return res.status(404).json({ success: false, message: "Survey not found or no longer accepting responses." });
-      }
-
-      const questions = getQuestionsBySurvey(surveyId);
-      for (const question of questions) {
-        if (question.required) {
-          const answer = answers[question._id.toString()];
-          if (answer === undefined || answer === null || answer === "" || (Array.isArray(answer) && answer.length === 0)) {
-            return res.status(400).json({ success: false, message: `Please answer the required question: "${question.text}"` });
-          }
-        }
-      }
-
-      const formattedAnswers = questions
-        .filter((question) => answers[question._id.toString()] !== undefined)
-        .map((question) => ({ question: question._id, answer: answers[question._id.toString()] }));
-
-      const response = createResponse({ survey: surveyId, respondent: "Anonymous", answers: formattedAnswers });
-      return res.status(201).json({ success: true, message: "Response submitted successfully.", data: response });
     }
 
     const survey = await Survey.findOne({ _id: surveyId, visibility: "public", status: "published" });
@@ -68,15 +40,6 @@ exports.createResponse = async (req, res) => {
 //get response by survey
 exports.getResponsesBySurvey = async (req, res) => {
   try {
-    if (isMockMode()) {
-      const survey = findSurveyById(req.params.surveyId);
-      if (!survey || String(survey.creator) !== String(req.user._id)) {
-        return res.status(404).json({ success: false, message: "Survey not found." });
-      }
-
-      const responses = getResponsesBySurvey(req.params.surveyId);
-      return res.status(200).json({ success: true, data: responses });
-    }
 
     const survey = await Survey.findOne({ _id: req.params.surveyId, creator: req.user._id });
     if (!survey) {

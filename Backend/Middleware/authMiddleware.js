@@ -1,7 +1,5 @@
 const jwt = require("jsonwebtoken");
-const mongoose = require("mongoose");
 const User = require("../Models/User");
-const { findUserById } = require("../Config/mockStore");
 
 exports.protect = async (req, res, next) => {
   try {
@@ -17,18 +15,13 @@ exports.protect = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    let user;
-
-    if (process.env.MOCK_MODE === "true" || mongoose.connection.readyState !== 1) {
-      user = findUserById(decoded.id);
-    } else {
-      user = await User.findById(decoded.id).select("-password");
-    }
+    const user = await User.findById(decoded.id).select("-password");
 
     if (!user) {
       return res.status(401).json({
         success: false,
         message: "User no longer exists.",
+        data: null,
       });
     }
 

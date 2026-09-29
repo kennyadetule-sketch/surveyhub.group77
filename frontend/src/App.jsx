@@ -15,7 +15,6 @@ import { useAuth } from './context/AuthContext';
 import { surveyService } from './services/surveyService';
 import { responseService } from './services/responseService';
 import { resultService } from './services/resultService';
-import { authService } from './services/authService';
 import { questionService } from './services/questionService';
 
 const statusTone = {
@@ -278,6 +277,7 @@ function LoginPage() {
             <Input
               id="password"
               label="Password"
+              autoComplete="current-password"
               type="password"
               placeholder="••••••••"
               value={form.password}
@@ -401,6 +401,7 @@ function RegisterPage() {
               <Input
                 id="register-password"
                 label="Password"
+                autoComplete="new-password"
                 type={showPassword ? 'text' : 'password'}
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -420,6 +421,7 @@ function RegisterPage() {
               <Input
                 id="confirmPassword"
                 label="Confirm password"
+                autoComplete="new-password"
                 type={showConfirm ? 'text' : 'password'}
                 value={form.confirmPassword}
                 onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
@@ -469,7 +471,7 @@ function DashboardPage() {
         setLoading(true);
         const data = await surveyService.getSurveys();
         setItems(data);
-      } catch (err) {
+      } catch {
         setError('Unable to load surveys.');
       } finally {
         setLoading(false);
@@ -609,7 +611,7 @@ function MySurveysPage() {
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
             <option value="All">All status</option>
             <option value="draft">Draft</option>
-            <option value="published">Published</option>
+            <option value="draft">Draft</option>
             <option value="closed">Closed</option>
           </select>
           <select value={sortValue} onChange={(e) => setSortValue(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
@@ -745,6 +747,7 @@ function CreateSurveyPage() {
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
             placeholder="Employee engagement survey"
+            maxLength={150}
           />
           <Textarea
             id="survey-description"
@@ -752,6 +755,7 @@ function CreateSurveyPage() {
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
             placeholder="Briefly describe what this survey is about."
+            maxLength={1000}
             rows={5}
           />
           <div className="grid gap-4 md:grid-cols-2">
@@ -769,12 +773,11 @@ function CreateSurveyPage() {
             <label>
               <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
               <select
-                value={normalizeStatus(form.status)}
-                onChange={(e) => setForm({ ...form, status: normalizeStatus(e.target.value) })}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700"
+                value="draft"
+                disabled
+                className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-500"
               >
                 <option value="draft">Draft</option>
-                <option value="published">Published</option>
               </select>
             </label>
           </div>
@@ -795,194 +798,138 @@ function CreateSurveyPage() {
 function QuestionBuilderPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const surveyId = location.state?.surveyId;
-  const [questions, setQuestions] = useState([
-    {
-      id: 'default-q-1',
-      type: 'multiple-choice',
-      text: 'How would you rate this course?',
-      required: true,
-      options: ['Excellent', 'Good', 'Average', 'Poor'],
-    },
-  ]);
+  const { id: routeSurveyId } = useParams();
+  const surveyId = routeSurveyId || location.state?.surveyId;
+  const [survey, setSurvey] = useState(null);
+  const [questions, setQuestions] = useState([]);
+  const [loading, setLoading] = useState(Boolean(surveyId));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [now] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!surveyId) return;
-    const loadSurvey = async () => {
-      const survey = await surveyService.getSurvey(surveyId);
-      if (survey?.questions?.length) setQuestions(survey.questions);
+    let active = true;
+    const run = async () => {
+      if (!surveyId) return;
+      setLoading(true);
+      try {
+        const data = await surveyService.getSurvey(surveyId);
+        if (active) { setSurvey(data); setQuestions(data?.questions || []); setError(''); }
+      } catch (err) {
+        if (active) setError(err?.response?.data?.message || 'Unable to load this survey.');
+      } finally {
+        if (active) setLoading(false);
+      }
     };
-    loadSurvey();
+    run();
+    return () => { active = false; };
   }, [surveyId]);
 
-  if (!surveyId) {
-    return (
-      <ErrorPage
-        message="This survey could not be loaded. Please return to the dashboard and create the survey again."
-        onRetry={() => navigate('/surveys/create')}
-      />
-    );
-  }
+  const updateQuestion = (index, field, value) => setQuestions((current) => current.map((q, i) => i === index ? { ...q, [field]: value } : q));
+  const updateOption = (questionIndex, optionIndex, value) => setQuestions((current) => current.map((q, i) => {
+    if (i !== questionIndex) return q;
+    const options = [...(q.options || [])];
+    options[optionIndex] = value;
+    return { ...q, options };
+  }));
+  const addOption = (index) => setQuestions((current) => current.map((q, i) => i === index ? { ...q, options: [...(q.options || []), `Option ${(q.options || []).length + 1}`] } : q));
+  const removeOption = (questionIndex, optionIndex) => setQuestions((current) => current.map((q, i) => {
+    if (i !== questionIndex) return q;
+    const options = (q.options || []).filter((_, idx) => idx !== optionIndex);
+    return { ...q, options };
+  }));
+  const removeQuestion = (index) => setQuestions((current) => current.filter((_, i) => i !== index));
+  const duplicateQuestion = (index) => setQuestions((current) => [...current, { ...current[index], id: `new-${Date.now()}` }]);
+  const moveQuestion = (index, direction) => setQuestions((current) => {
+    const next = [...current]; const target = index + direction;
+    if (target < 0 || target >= next.length) return current;
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  });
+  const addQuestion = () => setQuestions((current) => [...current, { id: `new-${Date.now()}`, type: 'short-text', text: '', required: false, options: [] }]);
 
-  const updateQuestion = (index, field, value) => {
-    setQuestions((current) => current.map((question, i) => i === index ? { ...question, [field]: value } : question));
-  };
+  const persistQuestions = async () => {
+    if (!surveyId) return;
+    setError('');
+    if (questions.length === 0) throw new Error('Add at least one question before saving or publishing this survey.');
 
-  const updateOption = (questionIndex, optionIndex, value) => {
-    setQuestions((current) => current.map((question, i) => {
-      if (i !== questionIndex) return question;
-      const options = [...(question.options || [])];
-      options[optionIndex] = value;
-      return { ...question, options };
-    }));
-  };
+    const existingQuestions = survey?.questions || [];
+    const existingIds = new Set(existingQuestions.map((q) => q.id || q._id));
+    const nextIds = new Set();
 
-  const addOption = (questionIndex) => {
-    setQuestions((current) => current.map((question, i) => {
-      if (i !== questionIndex) return question;
-      const options = question.options || ['Option 1'];
-      return { ...question, options: [...options, `Option ${options.length + 1}`] };
-    }));
-  };
+    for (let index = 0; index < questions.length; index += 1) {
+      const question = questions[index];
+      const payload = { text: question.text?.trim(), type: question.type, required: Boolean(question.required), options: question.options || [] };
+      if (!payload.text) throw new Error(`Question ${index + 1} needs question text.`);
+      if ((payload.type === 'multiple-choice' || payload.type === 'checkbox') && payload.options.length < 2) {
+        throw new Error(`Question ${index + 1} needs at least 2 options.`);
+      }
+      if (payload.text.length > 300) throw new Error(`Question ${index + 1} cannot exceed 300 characters.`);
+      if (payload.options.some((option) => !String(option).trim() || String(option).length > 100)) throw new Error(`Options for question ${index + 1} must be between 1 and 100 characters.`);
 
-  const removeQuestion = (index) => {
-    setQuestions((current) => current.filter((_, i) => i !== index));
-  };
+      const questionId = question.id || question._id;
+      if (questionId && existingIds.has(questionId)) {
+        await questionService.updateQuestion(questionId, payload);
+        nextIds.add(questionId);
+      } else {
+        const created = await questionService.createQuestion(surveyId, payload);
+        nextIds.add(created?.id || created?._id);
+      }
+    }
 
-  const duplicateQuestion = (index) => {
-    setQuestions((current) => {
-      const item = current[index];
-      return [...current, { ...item, id: `q-${Date.now()}` }];
-    });
-  };
-
-  const moveQuestion = (index, direction) => {
-    setQuestions((current) => {
-      const newQuestions = [...current];
-      const targetIndex = index + direction;
-      if (targetIndex < 0 || targetIndex >= newQuestions.length) return current;
-      [newQuestions[index], newQuestions[targetIndex]] = [newQuestions[targetIndex], newQuestions[index]];
-      return newQuestions;
-    });
-  };
-
-  const addQuestion = () => {
-    setQuestions((current) => [
-      ...current,
-      {
-        id: `q-${Date.now()}`,
-        type: 'short-text',
-        text: '',
-        required: false,
-        options: ['Option 1', 'Option 2'],
-      },
-    ]);
+    for (const existingQuestion of existingQuestions) {
+      const existingId = existingQuestion.id || existingQuestion._id;
+      if (existingId && !nextIds.has(existingId)) await questionService.deleteQuestion(existingId);
+    }
   };
 
   const saveDraft = async () => {
-    if (!surveyId) return;
-
+    setSaving(true);
     try {
-      const survey = await surveyService.getSurvey(surveyId);
-      const existingQuestions = survey?.questions || [];
-      const existingIds = new Set((existingQuestions || []).map((question) => question.id || question._id));
-      const nextIds = new Set();
-
-      for (const question of questions) {
-        const questionId = question.id || question._id;
-        const payload = { text: question.text?.trim(), type: question.type, required: Boolean(question.required), options: question.options || [] };
-
-        if (!payload.text) {
-          throw new Error(`Question ${questions.indexOf(question) + 1} needs question text.`);
-        }
-
-        if (questionId && existingIds.has(questionId)) {
-          await questionService.updateQuestion(questionId, payload);
-          nextIds.add(questionId);
-        } else {
-          const created = await questionService.createQuestion(surveyId, payload);
-          nextIds.add(created?.id || created?._id);
-        }
-      }
-
-      for (const existingQuestion of existingQuestions) {
-        const existingId = existingQuestion.id || existingQuestion._id;
-        if (existingId && !nextIds.has(existingId)) {
-          await questionService.deleteQuestion(existingId);
-        }
-      }
-
+      await persistQuestions();
       await surveyService.updateSurvey(surveyId, { status: 'draft' });
       navigate(`/surveys/${surveyId}`);
-    } catch (error) {
-      console.error('Unable to save survey draft.', error);
-    }
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || 'Unable to save the survey.');
+    } finally { setSaving(false); }
   };
 
-  const continueToPublish = async () => {
-    if (!surveyId) return;
-
-    if (questions.length === 0) {
-      console.error('A survey must contain at least one question before publishing.');
-      return;
-    }
-
+  const publish = async () => {
+    setSaving(true);
     try {
-      const survey = await surveyService.getSurvey(surveyId);
-      const existingQuestions = survey?.questions || [];
-      const existingIds = new Set((existingQuestions || []).map((question) => question.id || question._id));
-      const nextIds = new Set();
-
-      for (const question of questions) {
-        const questionId = question.id || question._id;
-        const payload = { text: question.text?.trim(), type: question.type, required: Boolean(question.required), options: question.options || [] };
-
-        if (!payload.text) {
-          throw new Error(`Question ${questions.indexOf(question) + 1} needs question text.`);
-        }
-
-        if (questionId && existingIds.has(questionId)) {
-          await questionService.updateQuestion(questionId, payload);
-          nextIds.add(questionId);
-        } else {
-          const created = await questionService.createQuestion(surveyId, payload);
-          nextIds.add(created?.id || created?._id);
-        }
-      }
-
-      for (const existingQuestion of existingQuestions) {
-        const existingId = existingQuestion.id || existingQuestion._id;
-        if (existingId && !nextIds.has(existingId)) {
-          await questionService.deleteQuestion(existingId);
-        }
-      }
-
+      await persistQuestions();
       await surveyService.updateSurvey(surveyId, { status: 'published' });
       navigate(`/surveys/${surveyId}`);
-    } catch (error) {
-      console.error('Unable to publish survey.', error);
-    }
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || 'Unable to publish the survey.');
+    } finally { setSaving(false); }
   };
+
+  if (!surveyId) return <ErrorPage message="This survey could not be loaded." onRetry={() => navigate('/surveys/create')} />;
+  if (loading) return <LoadingSpinner label="Loading questions..." />;
+  if (!survey) return <ErrorState title="Survey not found" message="This survey could not be loaded." />;
+
+  const isPublished = normalizeStatus(survey.status) === 'published';
+  const editWindowOpen = isPublished && survey.publishedAt ? (now - new Date(survey.publishedAt).getTime() <= 60 * 60 * 1000) : false;
+  const canEdit = !isPublished || editWindowOpen;
+
+  if (!canEdit) {
+    return <ErrorState title="Question editing is locked" message="This published survey passed its 1-hour question-edit window. Move it back to draft if you need to make structural changes." onAction={() => navigate(`/surveys/${surveyId}`)} actionLabel="Back to survey" />;
+  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Question builder</p>
-        <h2 className="mt-3 text-3xl font-bold text-slate-900">Build your survey</h2>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Question builder</p><h2 className="mt-3 text-3xl font-bold text-slate-900">{survey.title}</h2></div>
+        {isPublished && <Badge tone="green">Editing window open</Badge>}
       </div>
 
-      <div className="flex flex-wrap gap-3 text-sm text-slate-600">
-        <span className="rounded-full bg-slate-200 px-3 py-1.5">1. Survey Details</span>
-        <span className="rounded-full bg-blue-600 px-3 py-1.5 font-medium text-white">2. Questions</span>
-        <span className="rounded-full bg-slate-200 px-3 py-1.5">3. Review & Publish</span>
-      </div>
+      {isPublished && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">Published question editing is available for 1 hour after publishing. Changes affect the live survey.</p>}
 
-      {questions.length === 0 ? (
-        <EmptyState title="No questions yet" message="Add a question to start building your survey." action={<Button onClick={addQuestion}>Add Question</Button>} />
-      ) : (
+      {questions.length === 0 ? <EmptyState title="No questions yet" message="Add at least one question before publishing." action={<Button onClick={addQuestion}>Add Question</Button>} /> : (
         <div className="space-y-5">
           {questions.map((question, index) => (
-            <Card key={question.id} className="p-5">
+            <Card key={question.id || question._id || `question-${index}`} className="p-5">
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Question {index + 1}</p>
                 <div className="flex flex-wrap gap-2">
@@ -994,57 +941,23 @@ function QuestionBuilderPage() {
               </div>
 
               <div className="space-y-4">
-                <Input
-                  label="Question text"
-                  value={question.text}
-                  onChange={(e) => updateQuestion(index, 'text', e.target.value)}
-                  placeholder="Type your question here"
-                />
-
+                <Input label="Question text" value={question.text || ''} maxLength={300} onChange={(e) => updateQuestion(index, 'text', e.target.value)} placeholder="Type your question here" />
+                <div className="text-right text-xs text-slate-400">{(question.text || '').length}/300</div>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <label>
-                    <span className="mb-2 block text-sm font-medium text-slate-700">Question type</span>
-                    <select
-                      value={question.type}
-                      onChange={(e) => updateQuestion(index, 'type', e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700"
-                    >
-                      {questionTypeOptions.map((type) => (
-                        <option key={type} value={type}>{type.replace('-', ' ')}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="flex items-end">
-                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={question.required || false}
-                        onChange={(e) => updateQuestion(index, 'required', e.target.checked)}
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      Required
-                    </label>
-                  </div>
+                  <label><span className="mb-2 block text-sm font-medium text-slate-700">Question type</span><select value={question.type} onChange={(e) => updateQuestion(index, 'type', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">{questionTypeOptions.map((type) => <option key={type} value={type}>{type.replace('-', ' ')}</option>)}</select></label>
+                  <label className="flex items-end"><span className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700"><input type="checkbox" checked={question.required || false} onChange={(e) => updateQuestion(index, 'required', e.target.checked)} /> Required</span></label>
                 </div>
 
                 {(question.type === 'multiple-choice' || question.type === 'checkbox') && (
                   <div className="space-y-3">
-                    <p className="text-sm font-medium text-slate-700">Options</p>
+                    <p className="text-sm font-medium text-slate-700">Options (minimum 2, maximum 10)</p>
                     {(question.options || []).map((option, optionIndex) => (
-                      <div key={`${question.id}-option-${optionIndex}`} className="flex gap-2">
-                        <Input
-                          value={option}
-                          onChange={(e) => updateOption(index, optionIndex, e.target.value)}
-                          placeholder={`Option ${optionIndex + 1}`}
-                        />
-                        <Button variant="secondary" size="sm" onClick={() => setQuestions((current) => current.map((item, innerIndex) => {
-                          if (innerIndex !== index) return item;
-                          const nextOptions = (item.options || []).filter((_, i) => i !== optionIndex);
-                          return { ...item, options: nextOptions.length ? nextOptions : ['Option 1'] };
-                        }))}>Remove</Button>
+                      <div key={`${question.id || index}-option-${optionIndex}`} className="flex gap-2">
+                        <Input value={option} maxLength={100} onChange={(e) => updateOption(index, optionIndex, e.target.value)} placeholder={`Option ${optionIndex + 1}`} />
+                        <Button variant="secondary" size="sm" onClick={() => removeOption(index, optionIndex)}>Remove</Button>
                       </div>
                     ))}
-                    <Button variant="secondary" size="sm" onClick={() => addOption(index)}>Add option</Button>
+                    {(question.options || []).length < 10 && <Button variant="secondary" size="sm" onClick={() => addOption(index)}>Add option</Button>}
                   </div>
                 )}
               </div>
@@ -1053,11 +966,12 @@ function QuestionBuilderPage() {
         </div>
       )}
 
+      {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex flex-wrap gap-3">
         <Button variant="secondary" onClick={addQuestion}>Add Question</Button>
-        <Button variant="secondary" onClick={saveDraft}>Save Draft</Button>
-        <Button variant="secondary" onClick={() => navigate('/surveys/create')}>Back</Button>
-        <Button onClick={continueToPublish}>Continue</Button>
+        <Button variant="secondary" onClick={saveDraft} disabled={saving}>{saving ? 'Saving...' : 'Save Draft'}</Button>
+        <Button onClick={publish} disabled={saving}>{saving ? 'Saving...' : isPublished ? 'Save Changes' : 'Publish Survey'}</Button>
+        <Button variant="secondary" onClick={() => navigate(`/surveys/${surveyId}`)}>Back</Button>
       </div>
     </div>
   );
@@ -1068,75 +982,60 @@ function EditSurveyPage() {
   const { id } = useParams();
   const [survey, setSurvey] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [now] = useState(() => Date.now());
 
   useEffect(() => {
     const load = async () => {
-      const data = await surveyService.getSurvey(id);
-      setSurvey(data);
-      setLoading(false);
+      try { setSurvey(await surveyService.getSurvey(id)); }
+      catch (err) { setError(err?.response?.data?.message || 'Unable to load this survey.'); }
+      finally { setLoading(false); }
     };
     load();
   }, [id]);
 
+  const saveChanges = async () => {
+    setSaving(true); setError('');
+    try {
+      const updated = await surveyService.updateSurvey(id, {
+        title: survey.title,
+        description: survey.description,
+        visibility: normalizeVisibility(survey.visibility),
+        status: normalizeStatus(survey.status),
+      });
+      setSurvey((current) => ({ ...current, ...updated }));
+      navigate(`/surveys/${id}`);
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Unable to save changes.');
+    } finally { setSaving(false); }
+  };
+
   if (loading) return <LoadingSpinner label="Loading survey..." />;
-  if (!survey) return <ErrorState title="Survey not found" message="This survey could not be loaded." />;
+  if (!survey) return <ErrorState title="Survey not found" message={error || 'This survey could not be loaded.'} />;
+
+  const isPublished = normalizeStatus(survey.status) === 'published';
+  const editWindowOpen = isPublished && survey.publishedAt ? now - new Date(survey.publishedAt).getTime() <= 60 * 60 * 1000 : false;
+  const canEditQuestions = !isPublished || editWindowOpen;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Edit survey</p>
-          <h2 className="mt-3 text-3xl font-bold text-slate-900">{survey.title}</h2>
-        </div>
-        <Badge tone={getStatusTone(survey.status)}>{formatStatus(survey.status)}</Badge>
-      </div>
-
+      <div className="flex items-center justify-between"><div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Edit survey</p><h2 className="mt-3 text-3xl font-bold text-slate-900">{survey.title}</h2></div><Badge tone={getStatusTone(survey.status)}>{formatStatus(survey.status)}</Badge></div>
       <Card className="space-y-5">
-        <Input label="Title" value={survey.title} onChange={(e) => setSurvey({ ...survey, title: e.target.value })} />
-        <Textarea label="Description" value={survey.description} onChange={(e) => setSurvey({ ...survey, description: e.target.value })} rows={5} />
-
+        <Input label="Title" maxLength={150} value={survey.title} onChange={(e) => setSurvey({ ...survey, title: e.target.value })} />
+        <Textarea label="Description" maxLength={1000} value={survey.description} onChange={(e) => setSurvey({ ...survey, description: e.target.value })} rows={5} />
+        <div className="text-right text-xs text-slate-400">{survey.description.length}/1000</div>
         <div className="grid gap-4 md:grid-cols-2">
-          <label>
-            <span className="mb-2 block text-sm font-medium text-slate-700">Visibility</span>
-            <select value={normalizeVisibility(survey.visibility)} onChange={(e) => setSurvey({ ...survey, visibility: normalizeVisibility(e.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
-              <option value="public">Public</option>
-              <option value="private">Private</option>
-            </select>
-          </label>
-          <label>
-            <span className="mb-2 block text-sm font-medium text-slate-700">Status</span>
-            <select value={normalizeStatus(survey.status)} onChange={(e) => setSurvey({ ...survey, status: normalizeStatus(e.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
-              <option value="draft">Draft</option>
-              <option value="published">Published</option>
-              <option value="closed">Closed</option>
-            </select>
-          </label>
+          <label><span className="mb-2 block text-sm font-medium text-slate-700">Visibility</span><select value={normalizeVisibility(survey.visibility)} onChange={(e) => setSurvey({ ...survey, visibility: normalizeVisibility(e.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700"><option value="public">Public</option><option value="private">Private</option></select></label>
+          <label><span className="mb-2 block text-sm font-medium text-slate-700">Status</span><select value={normalizeStatus(survey.status)} onChange={(e) => setSurvey({ ...survey, status: normalizeStatus(e.target.value) })} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700"><option value="draft">Draft</option><option value="published">Published</option><option value="closed">Closed</option></select></label>
         </div>
-
+        {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="space-y-3">
-          <h3 className="text-lg font-semibold text-slate-900">Questions</h3>
-          {(survey.questions || []).map((question, index) => (
-            <div key={question.id} className="rounded-2xl border border-slate-200 p-4">
-              <p className="font-medium text-slate-900">{index + 1}. {question.text || 'Untitled question'}</p>
-              <p className="mt-1 text-sm text-slate-500">{question.type.replace('-', ' ')}</p>
-            </div>
-          ))}
+          <div className="flex items-center justify-between"><h3 className="text-lg font-semibold text-slate-900">Questions ({survey.questions?.length || 0})</h3><Button variant="secondary" size="sm" disabled={!canEditQuestions} onClick={() => navigate(`/surveys/${id}/questions`)}>Edit Questions</Button></div>
+          {(survey.questions || []).map((question, index) => <div key={question.id || question._id} className="rounded-2xl border border-slate-200 p-4"><p className="font-medium text-slate-900">{index + 1}. {question.text || 'Untitled question'}</p><p className="mt-1 text-sm text-slate-500">{question.type.replace('-', ' ')}</p></div>)}
+          {!canEditQuestions && <p className="text-sm text-amber-700">The 1-hour question editing window has closed for this published survey.</p>}
         </div>
-
-        <div className="flex flex-wrap gap-3 pt-5">
-          <Button onClick={async () => {
-            const payload = { ...survey, status: normalizeStatus(survey.status), visibility: normalizeVisibility(survey.visibility) };
-            await surveyService.updateSurvey(id, payload);
-            navigate(`/surveys/${id}`);
-          }}>Save changes</Button>
-          <Button variant="secondary" onClick={async () => {
-            const nextStatus = normalizeStatus(survey.status) === 'published' ? 'draft' : 'published';
-            const updated = { ...survey, status: nextStatus, visibility: normalizeVisibility(survey.visibility) };
-            await surveyService.updateSurvey(id, updated);
-            setSurvey(updated);
-          }}>{normalizeStatus(survey.status) === 'published' ? 'Move to Draft' : 'Publish Survey'}</Button>
-          <Link to={`/surveys/${id}`}><Button variant="secondary">Back to details</Button></Link>
-        </div>
+        <div className="flex flex-wrap gap-3 pt-5"><Button onClick={saveChanges} disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</Button><Link to={`/surveys/${id}`}><Button variant="secondary">Back to details</Button></Link></div>
       </Card>
     </div>
   );
@@ -1148,6 +1047,7 @@ function SurveyDetailsPage() {
   const [survey, setSurvey] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('Questions');
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const loadSurvey = async () => {
@@ -1172,6 +1072,7 @@ function SurveyDetailsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to={`/surveys/${id}/edit`}><Button variant="secondary" size="sm">Edit</Button></Link>
+          <Link to={`/surveys/${id}/questions`}><Button variant="secondary" size="sm">Edit Questions</Button></Link>
           <Button variant="secondary" size="sm" onClick={async () => {
             const nextStatus = normalizeStatus(survey.status) === 'published' ? 'draft' : 'published';
             const updated = { ...survey, status: nextStatus, visibility: normalizeVisibility(survey.visibility) };
@@ -1203,7 +1104,7 @@ function SurveyDetailsPage() {
           <span>Share link: /survey/{survey.id || survey._id}</span>
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm">Copy link</Button>
+          <Button variant="secondary" size="sm" onClick={async () => { try { await navigator.clipboard.writeText(`${window.location.origin}/survey/${id}`); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { setCopied(false); } }}>{copied ? 'Copied!' : 'Copy link'}</Button>
         </div>
       </Card>
 
@@ -1312,7 +1213,7 @@ function PublicSurveyPage() {
       await responseService.submitResponse(id, answers);
       navigate(`/survey/${id}/success`);
     } catch (err) {
-      setError('Unable to submit your response. Please try again.');
+      setError(err?.response?.data?.message || 'Unable to submit your response. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -1348,13 +1249,13 @@ function PublicSurveyPage() {
 
                 {question.type === 'short-text' && (
                   <div className="mt-4">
-                    <Input value={answers[question.id] || ''} onChange={(e) => handleInputChange(question.id, e.target.value)} placeholder="Your answer" />
+                    <Input value={answers[question.id] || ''} maxLength={300} onChange={(e) => handleInputChange(question.id, e.target.value)} placeholder="Your answer" />
                   </div>
                 )}
 
                 {question.type === 'long-text' && (
                   <div className="mt-4">
-                    <Textarea value={answers[question.id] || ''} onChange={(e) => handleInputChange(question.id, e.target.value)} rows={5} placeholder="Write your response here" />
+                    <Textarea value={answers[question.id] || ''} maxLength={2000} onChange={(e) => handleInputChange(question.id, e.target.value)} rows={5} placeholder="Write your response here" />
                   </div>
                 )}
 
@@ -1587,34 +1488,68 @@ function ResultsPage() {
 }
 
 function ProfilePage() {
-  const { currentUser } = useAuth();
-  const [form, setForm] = useState({ fullName: currentUser?.fullName || 'Ava Thompson', email: currentUser?.email || 'ava@surveyhub.com' });
+  const { currentUser, updateProfile } = useAuth();
+  const [form, setForm] = useState({ fullName: currentUser?.fullName || '', email: currentUser?.email || '' });
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [profileImage, setProfileImage] = useState(null);
+  const [preview, setPreview] = useState(currentUser?.profileImage || '');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const handleImage = (event) => {
+    const file = event.target.files?.[0] || null;
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setError('Profile picture must be JPG, PNG or WEBP.'); return; }
+    if (file.size > 5 * 1024 * 1024) { setError('Profile picture must not exceed 5 MB.'); return; }
+    setProfileImage(file);
+    setPreview(URL.createObjectURL(file));
+    setError('');
+  };
+
+  const handleSubmit = async () => {
+    setError(''); setMessage('');
+    if (form.fullName.trim().length < 3 || form.fullName.trim().length > 50) return setError('Full name must be between 3 and 50 characters.');
+    if (newPassword && newPassword.length < 6) return setError('New password must be at least 6 characters.');
+    if (newPassword !== confirmPassword) return setError('New password and confirmation do not match.');
+    setSaving(true);
+    try {
+      await updateProfile({ fullName: form.fullName, email: form.email, password: newPassword, profileImage });
+      setNewPassword(''); setConfirmPassword(''); setProfileImage(null);
+      setMessage('Profile updated successfully.');
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || 'Unable to update your profile.');
+    } finally { setSaving(false); }
+  };
+
+  const initials = (currentUser?.fullName || 'User').split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-center gap-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-xl font-bold text-blue-700">
-          {currentUser?.fullName?.slice(0, 2).toUpperCase() || 'AT'}
-        </div>
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">{form.fullName}</h2>
-          <p className="text-slate-500">{form.email} • {currentUser?.role || 'Creator'}</p>
-        </div>
+        {preview ? <img src={preview} alt="Profile" className="h-16 w-16 rounded-full object-cover" /> : <div className="flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-xl font-bold text-blue-700">{initials}</div>}
+        <div><h2 className="text-2xl font-bold text-slate-900">{form.fullName}</h2><p className="text-slate-500">{form.email} • {currentUser?.role || 'Creator'}</p></div>
       </div>
 
       <Card>
         <h3 className="text-xl font-semibold text-slate-900">Edit profile</h3>
         <div className="mt-5 space-y-5">
-          <Input label="Full name" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
-          <Input label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <Input label="Full name" maxLength={50} value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
+          <Input label="Email" type="email" maxLength={254} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           <Input label="Role" value={currentUser?.role || 'Creator'} readOnly />
+          <div>
+            <label htmlFor="profile-update-image" className="mb-2 block text-sm font-medium text-slate-700">Profile picture</label>
+            <input id="profile-update-image" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleImage} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" />
+            <p className="mt-1 text-xs text-slate-500">Optional. JPG, PNG or WEBP, maximum 5 MB.</p>
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
-            <Input label="New password" type="password" placeholder="••••••••" />
-            <Input label="Confirm password" type="password" placeholder="••••••••" />
+            <Input label="New password" type="password" value={newPassword} maxLength={100} onChange={(e) => setNewPassword(e.target.value)} placeholder="Leave blank to keep current password" />
+            <Input label="Confirm password" type="password" value={confirmPassword} maxLength={100} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repeat new password" />
           </div>
-          <div className="pt-3">
-            <Button>Update profile</Button>
-          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          {message && <p className="text-sm text-emerald-600">{message}</p>}
+          <div className="pt-3"><Button onClick={handleSubmit} disabled={saving}>{saving ? 'Updating...' : 'Update profile'}</Button></div>
         </div>
       </Card>
     </div>
@@ -1622,8 +1557,6 @@ function ProfilePage() {
 }
 
 function App() {
-  const { isAuthenticated } = useAuth();
-
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
@@ -1658,6 +1591,7 @@ function App() {
         <Route path="create/questions" element={<QuestionBuilderPage />} />
         <Route path=":id" element={<SurveyDetailsPage />} />
         <Route path=":id/edit" element={<EditSurveyPage />} />
+        <Route path=":id/questions" element={<QuestionBuilderPage />} />
         <Route path=":id/responses" element={<ResponsesPage />} />
         <Route path=":id/results" element={<ResultsPage />} />
       </Route>

@@ -7,7 +7,6 @@ const surveySchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-
     title: {
       type: String,
       required: true,
@@ -15,34 +14,32 @@ const surveySchema = new mongoose.Schema(
       minlength: 3,
       maxlength: 150,
     },
-
     description: {
       type: String,
       required: true,
       trim: true,
       maxlength: 1000,
     },
-
     visibility: {
       type: String,
       enum: ["public", "private"],
       default: "public",
     },
-
     status: {
       type: String,
       enum: ["draft", "published", "closed"],
       default: "draft",
     },
-
+    publishedAt: {
+      type: Date,
+      default: null,
+    },
     coverImage: {
       type: String,
       default: "",
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 module.exports = mongoose.model("Survey", surveySchema);

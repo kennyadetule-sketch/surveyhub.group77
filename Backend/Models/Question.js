@@ -16,14 +16,26 @@ const questionSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      minlength: 1,
+      maxlength: 300,
     },
     required: {
       type: Boolean,
       default: false,
     },
     options: {
-      type: [String],
+      type: [
+        {
+          type: String,
+          trim: true,
+          maxlength: 100,
+        },
+      ],
       default: [],
+      validate: {
+        validator: (options) => options.length <= 10,
+        message: "A question cannot have more than 10 options.",
+      },
     },
   },
   { timestamps: true }

@@ -465,6 +465,21 @@ function DashboardPage() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
 
+  const handleDeleteSurvey = async (survey) => {
+    const surveyId = survey.id || survey._id;
+    if (!surveyId) return;
+
+    const confirmed = window.confirm(`Delete "${survey.title}"? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      await surveyService.deleteSurvey(surveyId);
+      setItems((current) => current.filter((item) => (item.id || item._id) !== surveyId));
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || 'Unable to delete this survey.');
+    }
+  };
+
   useEffect(() => {
     const loadSurveys = async () => {
       try {
@@ -540,7 +555,7 @@ function DashboardPage() {
                   <Link to={`/surveys/${survey.id || survey._id}`}><Button variant="secondary" size="sm">View</Button></Link>
                   <Link to={`/surveys/${survey.id || survey._id}/edit`}><Button variant="secondary" size="sm">Edit</Button></Link>
                   <Link to={`/surveys/${survey.id || survey._id}/results`}><Button variant="secondary" size="sm">Results</Button></Link>
-                  <Button variant="danger" size="sm" onClick={() => { const target = survey.id || survey._id; if (target) surveyService.deleteSurvey(target); window.location.reload(); }}>Delete</Button>
+                  <Button variant="danger" size="sm" onClick={() => handleDeleteSurvey(survey)}>Delete</Button>
                 </div>
               </div>
             ))}
@@ -1226,7 +1241,11 @@ function PublicSurveyPage() {
     <div className="min-h-screen bg-slate-50 px-4 py-10">
       <div className="mx-auto max-w-3xl">
         <div className="mb-8 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 font-bold text-white">S</div>
+          <img
+            src="/android-chrome-192x192.png"
+            alt="SurveyHub"
+            className="h-12 w-12 rounded-xl object-cover"
+          />
           <div>
             <p className="text-xl font-bold text-slate-900">SurveyHub</p>
           </div>

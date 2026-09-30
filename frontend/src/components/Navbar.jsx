@@ -12,9 +12,11 @@ export function Navbar() {
     <header className="border-b border-slate-200 bg-white/90 backdrop-blur-sm">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
         <Link to="/" className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-lg font-bold text-white shadow-sm">
-            S
-          </div>
+          <img
+            src="/android-chrome-192x192.png"
+            alt="SurveyHub"
+            className="h-10 w-10 rounded-xl object-cover shadow-sm"
+          />
           <div>
             <p className="text-lg font-bold text-slate-900">SurveyHub</p>
           </div>
